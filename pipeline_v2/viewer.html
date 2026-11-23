@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReDraft</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1d2330; --muted: #6b7385; --line: #e3e6ec;
+  --accent: #1f6feb; --accent-soft: #e8f0fe; --canvas: #ffffff; --fg: #111111; --hl: #ff7a00;
+}
+:root[data-theme="dark"] {
+  --bg: #11141a; --panel: #181c24; --ink: #e6e9ef; --muted: #8b93a5; --line: #2a303c;
+  --accent: #4c8dff; --accent-soft: #1d2a44; --canvas: #0e1116; --fg: #e8e8e8; --hl: #ffb020;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; overflow: hidden; }
+header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 650; white-space: nowrap; }
+header .file { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+.sp { flex: 1; }
+button, .btn { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font: inherit; font-size: 13px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+button:hover, .btn:hover { border-color: var(--accent); }
+button.on { background: var(--accent-soft); border-color: var(--accent); }
+main { display: grid; grid-template-columns: 1fr 300px; min-height: 0; }
+#wrap { position: relative; min-width: 0; min-height: 0; background: var(--canvas); }
+canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+canvas.drag { cursor: grabbing; }
+#msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; text-align: center; padding: 16px; }
+aside { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button { flex: 1; border: 0; border-radius: 0; padding: 9px 4px; background: transparent; color: var(--muted); border-bottom: 2px solid transparent; }
+.tabs button.on { color: var(--ink); border-bottom-color: var(--accent); background: transparent; }
+.pane { display: none; overflow: auto; padding: 10px 12px; flex: 1; min-height: 0; }
+.pane.on { display: block; }
+.layer { display: flex; align-items: center; gap: 8px; padding: 4px 2px; border-radius: 4px; cursor: pointer; user-select: none; }
+.layer:hover { background: var(--accent-soft); }
+.layer input { margin: 0; }
+.sw { width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--line); flex: none; }
+.layer .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer.grp { font-weight: 600; margin-top: 2px; }
+.layer.child { padding-left: 26px; }
+.layer .tw { width: 12px; flex: none; color: var(--muted); }
+.layer .c { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.row { display: flex; gap: 6px; margin-bottom: 8px; }
+input[type=search] { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+.res { padding: 6px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.res:hover { background: var(--accent-soft); }
+.res small { color: var(--muted); display: block; }
+table.kv { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.kv td { padding: 4px 2px; border-bottom: 1px solid var(--line); vertical-align: top; word-break: break-word; }
+table.kv td:first-child { color: var(--muted); width: 38%; }
+.muted { color: var(--muted); }
+footer { display: flex; gap: 16px; padding: 4px 12px; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+h3 { font-size: 13px; margin: 4px 0 8px; }
+@media (max-width: 760px) {
+  main { grid-template-columns: 1fr; grid-template-rows: 1fr 40vh; }
+  aside { border-left: 0; border-top: 1px solid var(--line); }
+  header .file { max-width: 100%; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>DXF Viewer</h1>
+  <span class="file" id="fname">no file</span>
+  <span class="sp"></span>
+  <button id="fit" title="Fit to window (F)">⤢ Fit</button>
+  <button id="zin" title="Zoom in (+)">＋</button>
+  <button id="zout" title="Zoom out (−)">－</button>
+  <button id="theme" title="Light / dark">◐</button>
+  <label class="btn" title="Open a DXF from your computer">📂 Open DXF<input id="open" type="file" accept=".dxf" hidden></label>
+  <a class="btn" id="dl" href="#" download hidden>⬇ DXF</a>
+  <a class="btn" href="/upload">← Detect</a>
+</header>
+<main>
+  <div id="wrap"><canvas id="cv"></canvas><div id="msg">Loading…</div></div>
+  <aside>
+    <div class="tabs"><button data-p="layers" class="on">Layers</button><button data-p="search">Search</button><button data-p="info">Selected</button></div>
+    <div class="pane on" id="p-layers">
+      <div class="row"><button id="allon">All on</button><button id="alloff">All off</button></div>
+      <div id="layers"></div>
+    </div>
+    <div class="pane" id="p-search">
+      <input type="search" id="q" placeholder="Text, tag, class name …">
+      <div id="results" class="muted" style="margin-top:8px">Type to search text and symbol attributes.</div>
+    </div>
+    <div class="pane" id="p-info"><div id="info" class="muted">Click a symbol, equipment or tagged pipe in the drawing.</div></div>
+  </aside>
+</main>
+<footer><span id="xy">x – y –</span><span id="zoom"></span><span id="stats"></span></footer>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+let S = null, view = { s: 1, tx: 0, ty: 0 }, dpr = 1, paths = [], hidden = new Set(), sel = null, flash = null, dirty = true;
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// ---------- theme
+try { const t = localStorage.getItem('dxfv-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$('theme').onclick = () => {
+  const d = document.documentElement; d.dataset.theme = d.dataset.theme === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem('dxfv-theme', d.dataset.theme); } catch (e) {}
+  dirty = true;
+};
+
+// ---------- tabs
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => tab(b.dataset.p));
+function tab(p) {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x.dataset.p === p));
+  document.querySelectorAll('.pane').forEach(x => x.classList.toggle('on', x.id === 'p-' + p));
+}
+
+// ---------- loading
+async function load(src) {
+  $('msg').textContent = 'Loading ' + src.split('/').pop() + ' …'; $('msg').style.display = 'grid';
+  const r = await fetch('/api/scene?src=' + encodeURIComponent(src));
+  if (!r.ok) { $('msg').textContent = 'Could not open this DXF: ' + (await r.text()); return; }
+  S = await r.json();
+  $('fname').textContent = src.replace(/\/out\/drawing\.dxf$/, '').split('/').slice(-2).join(' / ') || S.file;
+  $('dl').href = '/api/dxf?src=' + encodeURIComponent(src); $('dl').hidden = false;
+  hidden = new Set(S.layers.filter(l => !l.on).map(l => l.name)); openGroups = new Set(S.layer_groups || []);
+  build(); layersUI(); fit(); $('msg').style.display = 'none';
+  const n = S.groups.reduce((a, g) => a + g.segs.length / 4 + g.polys.length + g.fills.length, 0);
+  $('stats').textContent = `${n.toLocaleString()} shapes · ${S.texts.length.toLocaleString()} texts · ${S.objects.length} objects` +
+    (Object.keys(S.skipped).length ? ' · skipped: ' + Object.entries(S.skipped).map(([k, v]) => k + ' ' + v).join(', ') : '');
+}
+function build() {
+  paths = S.groups.map(g => {
+    const p = new Path2D(), f = new Path2D(), s = g.segs;
+    for (let i = 0; i < s.length; i += 4) { p.moveTo(s[i], s[i + 1]); p.lineTo(s[i + 2], s[i + 3]); }
+    for (const q of g.polys) { p.moveTo(q[0], q[1]); for (let i = 2; i < q.length; i += 2) p.lineTo(q[i], q[i + 1]); }
+    for (const q of g.fills) { f.moveTo(q[0], q[1]); for (let i = 2; i < q.length; i += 2) f.lineTo(q[i], q[i + 1]); f.closePath(); }
+    const L = S.layers.find(l => l.name === g.layer);
+    return { layer: g.layer, c: g.c, stroke: p, fill: g.fills.length ? f : null, dashed: L && L.dashed };
+  });
+}
+// layers as a tree: the DXF's layer groups (SYMBOLS / PIPES / FLOW ARROWS / OTHERS), else one flat list
+let openGroups = new Set();
+function layersUI() {
+  const box = $('layers'); box.innerHTML = '';
+  const row = (l, child) => {
+    const d = document.createElement('label'); d.className = 'layer' + (child ? ' child' : '');
+    const col = l.color === 'fg' ? 'var(--fg)' : l.color;
+    const short = child && l.name.startsWith(l.group + '-') ? l.name.slice(l.group.length + 1) : l.name;
+    d.innerHTML = `<input type="checkbox" ${hidden.has(l.name) ? '' : 'checked'}><span class="sw" style="background:${col}"></span><span class="n" title="${esc(l.name)}">${esc(short)}</span><span class="c">${l.count.toLocaleString()}</span>`;
+    d.querySelector('input').onchange = e => { e.target.checked ? hidden.delete(l.name) : hidden.add(l.name); dirty = true; layersUI(); };
+    return d;
+  };
+  const names = S.layer_groups || [];
+  if (!names.length) { for (const l of S.layers) box.appendChild(row(l, false)); return; }
+  for (const g of names) {
+    const ls = S.layers.filter(l => l.group === g && !(l.name === '0' && !l.count));    // AutoCAD's own empty layer 0: not listed
+    if (!ls.length) continue;
+    const on = ls.filter(l => !hidden.has(l.name)).length, open = openGroups.has(g);
+    const h = document.createElement('div'); h.className = 'layer grp';
+    h.innerHTML = `<span class="tw">${open ? '▾' : '▸'}</span><input type="checkbox" ${on ? 'checked' : ''}><span class="n">${esc(g)}</span><span class="c">${ls.length} layer${ls.length > 1 ? 's' : ''} · ${ls.reduce((a, l) => a + l.count, 0).toLocaleString()}</span>`;
+    const cb = h.querySelector('input'); cb.indeterminate = on > 0 && on < ls.length;
+    cb.onclick = e => e.stopPropagation();
+    cb.onchange = e => { ls.forEach(l => e.target.checked ? hidden.delete(l.name) : hidden.add(l.name)); dirty = true; layersUI(); };
+    h.onclick = () => { open ? openGroups.delete(g) : openGroups.add(g); layersUI(); };
+    box.appendChild(h);
+    if (open) for (const l of ls) box.appendChild(row(l, true));
+  }
+  const rest = S.layers.filter(l => !l.group || !names.includes(l.group));
+  for (const l of rest) box.appendChild(row(l, false));
+}
+$('allon').onclick = () => { hidden.clear(); layersUI(); dirty = true; };
+$('alloff').onclick = () => { S.layers.forEach(l => hidden.add(l.name)); layersUI(); dirty = true; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---------- view
+function resize() {
+  dpr = window.devicePixelRatio || 1; const r = cv.getBoundingClientRect();
+  cv.width = Math.max(1, Math.round(r.width * dpr)); cv.height = Math.max(1, Math.round(r.height * dpr)); dirty = true;
+}
+function fit(box) {
+  if (!S) return; const r = cv.getBoundingClientRect(); const e = box || S.extents;
+  const w = Math.max(e[2] - e[0], 1e-6), h = Math.max(e[3] - e[1], 1e-6);
+  view.s = Math.min(r.width / w, r.height / h) * (box ? 0.5 : 0.95);
+  view.tx = r.width / 2 - (e[0] + w / 2) * view.s; view.ty = r.height / 2 + (e[1] + h / 2) * view.s; dirty = true;
+}
+const toWorld = (sx, sy) => [(sx - view.tx) / view.s, -(sy - view.ty) / view.s];
+function zoomAt(sx, sy, k) {
+  const [wx, wy] = toWorld(sx, sy); view.s = Math.min(Math.max(view.s * k, 1e-4), 1e5);
+  view.tx = sx - wx * view.s; view.ty = sy + wy * view.s; dirty = true;
+}
+
+// ---------- drawing
+function draw() {
+  requestAnimationFrame(draw);
+  if (!dirty || !S) return; dirty = false;
+  const fg = cssVar('--fg'), hl = cssVar('--hl');
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = cssVar('--canvas'); ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(view.s * dpr, 0, 0, -view.s * dpr, view.tx * dpr, view.ty * dpr);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const p of paths) {
+    if (hidden.has(p.layer)) continue;
+    const col = p.c === 'fg' ? fg : p.c;
+    if (p.fill) { ctx.fillStyle = col; ctx.fill(p.fill); }
+    ctx.strokeStyle = col; ctx.lineWidth = (p.layer.startsWith('PIPE') ? 1.6 : 1) / view.s;
+    ctx.setLineDash(p.dashed ? [7 / view.s, 4 / view.s] : []); ctx.stroke(p.stroke);
+  }
+  ctx.setLineDash([]);
+  drawTexts(fg);
+  for (const [o, c, w] of [[sel, hl, 2.5], [flash, hl, 3.5]]) {
+    if (!o) continue; const b = o.bbox, pad = 3 / view.s;
+    ctx.strokeStyle = c; ctx.lineWidth = w / view.s; ctx.strokeRect(b[0] - pad, b[1] - pad, b[2] - b[0] + 2 * pad, b[3] - b[1] + 2 * pad);
+  }
+  $('zoom').textContent = 'zoom ' + (view.s >= 10 ? view.s.toFixed(0) : view.s.toPrecision(3)) + ' px/' + (S.units || 'unit');
+}
+function drawTexts(fg) {
+  const r = cv.getBoundingClientRect(), [x0, y1] = toWorld(0, 0), [x1, y0] = toWorld(r.width, r.height);
+  ctx.textBaseline = 'alphabetic';
+  for (const t of S.texts) {
+    if (hidden.has(t.layer)) continue;
+    const px = t.h * view.s; if (px < 3) continue;
+    const ax = t.x2 !== undefined && t.ha && t.ha !== 3 && t.ha !== 5 ? t.x2 : t.x, ay = t.x2 !== undefined && t.ha && t.ha !== 3 && t.ha !== 5 ? t.y2 : t.y;
+    const m = t.h * Math.max(8, t.t.length);
+    if (ax < x0 - m || ax > x1 + m || ay < y0 - m || ay > y1 + m) continue;
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.translate(ax * view.s + view.tx, -ay * view.s + view.ty); ctx.rotate(-t.r * Math.PI / 180);
+    ctx.fillStyle = t.c === 'fg' ? fg : t.c; ctx.font = `${px}px "DejaVu Sans", Arial, sans-serif`;
+    if (t.mt) {                                   // MTEXT: attachment point 1..9
+      const lines = t.t.split('\n'), col = (t.mt - 1) % 3, row = Math.floor((t.mt - 1) / 3), lh = px * 1.6;
+      ctx.textAlign = ['left', 'center', 'right'][col];
+      const top = [px, px - lines.length * lh / 2, px - lines.length * lh][row];
+      lines.forEach((s, i) => ctx.fillText(s, 0, top + i * lh));
+    } else if ((t.ha === 3 || t.ha === 5) && t.x2 !== undefined) {      // ALIGNED / FIT: stretch between the two points
+      const w = Math.hypot(t.x2 - t.x, t.y2 - t.y) * view.s, tw = ctx.measureText(t.t).width || 1;
+      ctx.scale(w / tw, t.ha === 3 ? w / tw : 1); ctx.textAlign = 'left'; ctx.fillText(t.t, 0, 0);
+    } else {
+      ctx.textAlign = ['left', 'center', 'right', 'left', 'center', 'left'][t.ha || 0];
+      const dy = [0, 0, px / 2 * 0.75, px * 0.75][t.va || 0] + (t.ha === 4 ? px * 0.35 : 0);
+      if (t.wf && t.wf !== 1) ctx.scale(t.wf, 1);
+      ctx.fillText(t.t, 0, dy);
+    }
+    ctx.restore();
+  }
+}
+
+// ---------- interaction
+let drag = null; const pts = new Map();
+cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.offsetX, e.offsetY]); drag = { x: e.offsetX, y: e.offsetY, moved: false }; });
+cv.addEventListener('pointermove', e => {
+  const [wx, wy] = toWorld(e.offsetX, e.offsetY);
+  $('xy').textContent = `x ${wx.toFixed(2)}  y ${wy.toFixed(2)} ${S && S.units ? S.units : ''}`;
+  if (!pts.has(e.pointerId)) return;
+  if (pts.size === 2) {                                   // pinch
+    const [a, b] = [...pts.values()], d0 = Math.hypot(a[0] - b[0], a[1] - b[1]);
+    pts.set(e.pointerId, [e.offsetX, e.offsetY]);
+    const [c, d] = [...pts.values()], d1 = Math.hypot(c[0] - d[0], c[1] - d[1]);
+    if (d0 > 0) zoomAt((c[0] + d[0]) / 2, (c[1] + d[1]) / 2, d1 / d0); drag.moved = true; return;
+  }
+  const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 2) { drag.moved = true; cv.classList.add('drag'); }
+  view.tx += dx; view.ty += dy; drag.x = e.offsetX; drag.y = e.offsetY; pts.set(e.pointerId, [e.offsetX, e.offsetY]); dirty = true;
+});
+cv.addEventListener('pointerup', e => {
+  pts.delete(e.pointerId); cv.classList.remove('drag');
+  if (drag && !drag.moved && pts.size === 0) pick(e.offsetX, e.offsetY);
+  if (pts.size === 0) drag = null;
+});
+cv.addEventListener('wheel', e => { e.preventDefault(); zoomAt(e.offsetX, e.offsetY, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+cv.addEventListener('dblclick', e => zoomAt(e.offsetX, e.offsetY, 2));
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  const r = cv.getBoundingClientRect();
+  if (e.key === 'f' || e.key === 'F') fit();
+  if (e.key === '+' || e.key === '=') zoomAt(r.width / 2, r.height / 2, 1.5);
+  if (e.key === '-') zoomAt(r.width / 2, r.height / 2, 1 / 1.5);
+  if (e.key === 'Escape') { sel = null; dirty = true; }
+});
+$('fit').onclick = () => fit();
+$('zin').onclick = () => { const r = cv.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1.5); };
+$('zout').onclick = () => { const r = cv.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1 / 1.5); };
+window.addEventListener('resize', () => { resize(); });
+
+function pick(sx, sy) {
+  if (!S) return; const [x, y] = toWorld(sx, sy), pad = 4 / view.s; let best = null;
+  for (const o of S.objects) {
+    if (hidden.has(o.layer)) continue; const b = o.bbox;
+    if (x < b[0] - pad || x > b[2] + pad || y < b[1] - pad || y > b[3] + pad) continue;
+    const a = (b[2] - b[0] + pad) * (b[3] - b[1] + pad);
+    if (!best || a < best.a) best = { o, a };
+  }
+  sel = best ? best.o : null; dirty = true; showInfo(sel);
+}
+function showInfo(o) {
+  if (!o) { $('info').innerHTML = '<span class="muted">Nothing here. Click a symbol, equipment or tagged pipe.</span>'; return; }
+  const rows = Object.entries(o.attribs || {}).filter(([k, v]) => v !== '').map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
+  const b = o.bbox;
+  $('info').innerHTML = `<h3>${esc(o.title)}</h3><table class="kv">${rows}
+    <tr><td>Layer</td><td>${esc(o.layer)}</td></tr>${o.block ? `<tr><td>Block</td><td>${esc(o.block)}</td></tr>` : ''}
+    ${o.rotation ? `<tr><td>Rotation</td><td>${o.rotation}°</td></tr>` : ''}
+    <tr><td>Size</td><td>${(b[2] - b[0]).toFixed(2)} × ${(b[3] - b[1]).toFixed(2)} ${S.units || ''}</td></tr>
+    <tr><td>Position</td><td>${((b[0] + b[2]) / 2).toFixed(2)}, ${((b[1] + b[3]) / 2).toFixed(2)}</td></tr></table>`;
+  tab('info');
+}
+
+// ---------- search
+$('q').addEventListener('input', () => {
+  const q = $('q').value.trim().toLowerCase(), box = $('results');
+  if (q.length < 2) { box.innerHTML = '<span class="muted">Type at least 2 characters.</span>'; return; }
+  const hits = [];
+  for (const o of S.objects) {
+    const s = Object.values(o.attribs || {}).join(' ') + ' ' + (o.title || '');
+    if (s.toLowerCase().includes(q)) hits.push({ label: o.title + (o.attribs && o.attribs.TAG ? ' · ' + o.attribs.TAG : ''), sub: o.layer, bbox: o.bbox, o });
+  }
+  for (const t of S.texts) if (t.t.toLowerCase().includes(q)) {
+    const L = t.h * Math.max(t.t.length * 0.6, 1);
+    hits.push({ label: t.t, sub: 'text · ' + t.layer, bbox: [t.x - L, t.y - L, t.x + L, t.y + L] });
+  }
+  box.innerHTML = hits.length ? '' : '<span class="muted">No match.</span>';
+  hits.slice(0, 300).forEach(h => {
+    const d = document.createElement('div'); d.className = 'res'; d.innerHTML = `${esc(h.label)}<small>${esc(h.sub)}</small>`;
+    d.onclick = () => { fit(h.bbox); flash = { bbox: h.bbox }; if (h.o) { sel = h.o; showInfo(h.o); } dirty = true; setTimeout(() => { flash = null; dirty = true; }, 1500); };
+    box.appendChild(d);
+  });
+  if (hits.length > 300) box.insertAdjacentHTML('beforeend', `<div class="muted">… ${hits.length - 300} more</div>`);
+});
+
+// ---------- open a local DXF
+$('open').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $('msg').textContent = 'Uploading ' + f.name + ' …'; $('msg').style.display = 'grid';
+  const fd = new FormData(); fd.append('file', f);
+  const r = await fetch('/api/view', { method: 'POST', body: fd }); const j = await r.json();
+  if (j.src) { history.replaceState(null, '', '?src=' + encodeURIComponent(j.src)); load(j.src); }
+  else $('msg').textContent = j.error || 'upload failed';
+};
+
+resize(); requestAnimationFrame(draw);
+const src = new URLSearchParams(location.search).get('src');
+if (src) load(src); else $('msg').textContent = 'Open a DXF (📂) or pick a job on the Jobs page.';
+</script>
+</body>
+</html>

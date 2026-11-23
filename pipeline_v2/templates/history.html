@@ -1,0 +1,11 @@
+{% extends "_base.html" %}
+{% block title %}ReDraft{% endblock %}
+{% block body %}
+<div class="page">
+  <div class="page-head">
+    <h2>History</h2>
+    <span class="sub">Every drawing converted on this server, newest first.</span>
+  </div>
+  {% with limit=0, search=True %}{% include "_jobs.html" %}{% endwith %}
+</div>
+{% endblock %}

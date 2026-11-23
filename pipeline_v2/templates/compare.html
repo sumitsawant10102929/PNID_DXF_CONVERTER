@@ -1,0 +1,133 @@
+{% extends "_base.html" %}
+{% block title %}ReDraft{% endblock %}
+{% block head %}
+<style>
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; }
+  .cmp-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; background: var(--card); border-bottom: 1px solid var(--line); }
+  .cmp-bar .name { font-weight: 600; font-size: 1rem; margin-right: 6px; word-break: break-all; }
+  .cmp-bar .btn { padding: .25rem .65rem; font-size: .85rem; border-radius: 7px; }
+  .cmp-bar select { width: auto; font-size: .85rem; padding: 2px 6px; height: auto; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button { border: none; background: var(--soft); padding: .25rem .7rem; font-size: .85rem; color: var(--ink); }
+  .seg button.on { background: var(--brand); color: #fff; }
+  .panes { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; min-height: 0; }
+  .pane { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: grab; }
+  .pane.drag { cursor: grabbing; }
+  .pane img { position: absolute; left: 0; top: 0; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; max-width: none; }
+  .pane iframe { width: 100%; height: 100%; border: 0; }
+  .pane .label { position: absolute; left: 10px; top: 8px; z-index: 3; background: rgba(31, 41, 55, .78); color: #fff; font-size: .78rem; font-weight: 600; padding: 3px 9px; border-radius: 6px; pointer-events: none; }
+  .pane .wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--mute); font-size: .95rem; z-index: 2; background: #fff; }
+  .cross { position: absolute; z-index: 2; pointer-events: none; display: none; }
+  .cross::before, .cross::after { content: ""; position: absolute; background: #e11d48; }
+  .cross::before { left: -14px; top: -1px; width: 28px; height: 2px; }
+  .cross::after { top: -14px; left: -1px; width: 2px; height: 28px; }
+  @media (max-width: 800px) { .panes { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
+</style>
+{% endblock %}
+{% block body %}
+<div class="cmp-bar">
+  <span class="name" id="fname">Loading…</span>
+  <select id="pageSel" class="form-control" style="display:none"></select>
+  <span class="hint">Right side:</span>
+  <div class="seg" id="mode"><button type="button" data-m="pic" class="on">Result picture</button><button type="button" data-m="dxf">DXF viewer</button></div>
+  <button type="button" class="btn btn-soft" id="fit"><i class="fas fa-expand"></i> Fit</button>
+  <span class="hint" id="hint">Wheel to zoom, drag to move — both sides move together; the red cross marks the same point.</span>
+  <span style="flex:1"></span>
+  <a class="btn btn-soft" id="dlDxf"><i class="fas fa-download"></i> DXF</a>
+  <a class="btn btn-soft" id="openViewer"><i class="fas fa-eye"></i> Viewer</a>
+</div>
+<div class="panes">
+  <div class="pane" id="pL"><span class="label">Original drawing</span><div class="wait" id="wL"><span><i class="fas fa-spinner fa-spin"></i> Preparing the original…</span></div><img id="iL" alt=""><div class="cross" id="cL"></div></div>
+  <div class="pane" id="pR"><span class="label" id="lR">Result — what was found</span><div class="wait" id="wR"><span><i class="fas fa-spinner fa-spin"></i> Loading…</span></div><img id="iR" alt=""><div class="cross" id="cR"></div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const q = new URLSearchParams(location.search), jid = q.get('job');
+let k = +(q.get('page') || 0), job = null, mode = 'pic';
+const iL = document.getElementById('iL'), iR = document.getElementById('iR'), pL = document.getElementById('pL'), pR = document.getElementById('pR');
+let W = 0, H = 0, s = 1, ox = 0, oy = 0, drag = null;
+
+function apply() {
+  for (const im of [iL, iR]) { im.style.width = W + 'px'; im.style.height = H + 'px'; im.style.transform = 'translate(' + ox + 'px,' + oy + 'px) scale(' + s + ')'; }
+}
+function fit() {
+  if (!W) return; const r = pL.getBoundingClientRect();
+  s = Math.min(r.width / W, r.height / H); ox = (r.width - W * s) / 2; oy = (r.height - H * s) / 2; apply();
+}
+function sized() { if (iL.naturalWidth) { W = iL.naturalWidth; H = iL.naturalHeight; } else if (iR.naturalWidth) { W = iR.naturalWidth; H = iR.naturalHeight; } }
+iL.onload = () => { document.getElementById('wL').style.display = 'none'; const first = !W; sized(); if (first) fit(); else apply(); };
+iR.onload = () => { document.getElementById('wR').style.display = 'none'; const first = !W; sized(); if (first) fit(); else apply(); };
+iL.onerror = () => { document.getElementById('wL').innerHTML = '<span class="text-danger">The original could not be shown.</span>'; };
+
+function load() {
+  const p = job.pages[k];
+  document.getElementById('dlDxf').href = p.files['drawing.dxf'];
+  const v = '/viewer?src=' + encodeURIComponent(p.files['drawing.dxf'].replace(/^\/jobs\//, ''));
+  document.getElementById('openViewer').href = v;
+  W = 0; document.getElementById('wL').style.display = ''; document.getElementById('wR').style.display = '';
+  iL.src = '/api/jobs/' + encodeURIComponent(jid) + '/original?page=' + k;
+  setMode(mode);
+}
+function setMode(m) {
+  mode = m;
+  for (const b of document.querySelectorAll('#mode button')) b.classList.toggle('on', b.dataset.m === m);
+  const p = job.pages[k], old = pR.querySelector('iframe'); if (old) old.remove();
+  if (m === 'dxf') {
+    iR.style.display = 'none'; document.getElementById('wR').style.display = 'none'; document.getElementById('cR').style.display = 'none';
+    document.getElementById('lR').textContent = 'Result — DXF (zooms on its own)';
+    const f = document.createElement('iframe'); f.src = '/viewer?src=' + encodeURIComponent(p.files['drawing.dxf'].replace(/^\/jobs\//, '')); pR.appendChild(f);
+    pR.style.cursor = 'default';
+  } else {
+    iR.style.display = ''; document.getElementById('lR').textContent = 'Result — what was found';
+    if (!iR.src.endsWith(p.files['preview.png'])) { document.getElementById('wR').style.display = ''; iR.src = p.files['preview.png']; }
+    pR.style.cursor = '';
+  }
+}
+document.getElementById('mode').onclick = e => { const b = e.target.closest('button'); if (b) setMode(b.dataset.m); };
+document.getElementById('fit').onclick = fit;
+window.addEventListener('resize', fit);
+
+// zoom and pan: the same transform on both pictures (they are the same size, pixel on pixel)
+const syncPane = p => p === pL || mode === 'pic';
+for (const p of [pL, pR]) {
+  p.addEventListener('wheel', e => {
+    if (!syncPane(p) || !W) return;
+    e.preventDefault(); const r = p.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, z = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+    ox = mx - (mx - ox) * z; oy = my - (my - oy) * z; s *= z; apply(); cross(e, p);
+  }, { passive: false });
+  p.addEventListener('mousedown', e => { if (!syncPane(p)) return; drag = [e.clientX - ox, e.clientY - oy]; p.classList.add('drag'); });
+  p.addEventListener('mousemove', e => cross(e, p));
+  p.addEventListener('mouseleave', () => { document.getElementById('cL').style.display = 'none'; document.getElementById('cR').style.display = 'none'; });
+}
+document.addEventListener('mousemove', e => { if (drag) { ox = e.clientX - drag[0]; oy = e.clientY - drag[1]; apply(); } });
+document.addEventListener('mouseup', () => { drag = null; pL.classList.remove('drag'); pR.classList.remove('drag'); });
+
+// the red cross: where the mouse is on one side, the same point of the drawing on the other
+function cross(e, p) {
+  if (!syncPane(p) || mode !== 'pic') return;
+  const r = p.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  const other = p === pL ? document.getElementById('cR') : document.getElementById('cL');
+  document.getElementById(p === pL ? 'cL' : 'cR').style.display = 'none';
+  other.style.display = 'block'; other.style.left = x + 'px'; other.style.top = y + 'px';
+}
+
+(async () => {
+  if (!jid) { document.getElementById('fname').textContent = 'No drawing chosen'; return; }
+  job = await (await fetch('/api/jobs/' + encodeURIComponent(jid))).json();
+  document.getElementById('fname').textContent = job.file || jid;
+  if (job.status !== 'done' || !(job.pages || []).length) {
+    document.getElementById('wL').innerHTML = '<span>Not processed yet (' + esc(job.status) + ') — this page shows it once it is done.</span>';
+    document.getElementById('wR').innerHTML = ''; return;
+  }
+  if (job.pages.length > 1) {
+    const sel = document.getElementById('pageSel'); sel.style.display = '';
+    sel.innerHTML = job.pages.map((p, i) => '<option value="' + i + '">' + esc(p.name) + '</option>').join(''); sel.value = k;
+    sel.onchange = () => { k = +sel.value; history.replaceState(null, '', '?job=' + encodeURIComponent(jid) + '&page=' + k); load(); };
+  }
+  load();
+})();
+</script>
+{% endblock %}

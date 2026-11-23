@@ -1,0 +1,182 @@
+<!-- The list of drawings (Detect and History pages): one card per drawing. Polls /api/jobs and redraws only when something changed. -->
+<style>
+  .jobs-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .jobs-bar input[type=search] { flex: 1; min-width: 220px; max-width: 420px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; }
+  .job { background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 2px 8px rgba(16, 24, 40, .05); padding: 14px 16px; margin-bottom: 12px; display: grid; grid-template-columns: 28px auto minmax(0, 1fr); gap: 14px; align-items: start; }
+  .job > div:last-child { min-width: 0; }        /* a long log line / name stays inside the card (cut with …) */
+  .thumbs { display: flex; gap: 6px; }
+  .thumbs a { display: block; position: relative; text-decoration: none; }
+  .job .thumb { width: 170px; height: 120px; border: 1px solid var(--line); border-radius: 8px; background: #fff; object-fit: contain; object-position: center; cursor: zoom-in; display: block; }
+  .thumbs .tl { position: absolute; left: 5px; bottom: 5px; background: rgba(31, 41, 55, .75); color: #fff; font-size: .68rem; font-weight: 600; padding: 1px 6px; border-radius: 4px; }
+  .thumbs .ph { width: 170px; height: 120px; border: 1px dashed var(--line); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--mute); font-size: .8rem; text-align: center; background: var(--soft); }
+  @media (max-width: 760px) { .job { grid-template-columns: 28px minmax(0, 1fr); } .thumbs { grid-column: 2; } .job > div:last-child { grid-column: 1 / -1; } }
+  /* a phone: the two pictures share the card's width (side by side, each half) */
+  @media (max-width: 760px) { .thumbs { min-width: 0; } .thumbs > a, .thumbs > .ph { flex: 1 1 0; min-width: 0; } .job .thumb, .thumbs .ph { width: 100%; height: auto; aspect-ratio: 17 / 12; } }
+  .job .name { font-weight: 600; font-size: 1rem; word-break: break-all; }
+  .job .meta { color: var(--mute); font-size: .82rem; }
+  .job .top { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+  .job .counts { margin: 8px 0 4px; }
+  .job .eq { font-size: .85rem; color: var(--ink); margin-top: 2px; }
+  .job .eq b { color: var(--mute); font-weight: 600; }
+  .job .acts { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .job .acts .btn { padding: .25rem .6rem; font-size: .82rem; border-radius: 7px; }
+  .job .page-name { font-size: .85rem; color: var(--brand); font-weight: 600; margin-top: 6px; }
+  .job .pg + .pg { border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 8px; }
+  .job input[type=checkbox] { margin-top: 4px; }
+  .empty { color: var(--mute); text-align: center; padding: 30px; }
+</style>
+<div class="jobs-bar">
+  <label class="mb-0 hint" title="Tick every drawing in the list (not the ones being processed)"><input type="checkbox" id="selAll"> all</label>
+  <button id="delSel" class="btn btn-outline-danger btn-sm" disabled title="Delete the ticked drawings and their results from the server"><i class="fas fa-trash"></i> Delete selected</button>
+  <small id="selInfo" class="text-muted"></small>
+  {% if search %}<input id="jobSearch" type="search" placeholder="Search file name or equipment…">{% endif %}
+</div>
+<div id="jobBody"><div class="empty">Loading…</div></div>
+
+<!-- preview picture, with wheel zoom and drag -->
+<div class="modal fade" id="outputModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered wide" role="document">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="outputModalLabel">Preview</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button></div>
+      <div class="modal-body p-1"><div id="zoomWrap"><img id="zoomImage" src="" alt="preview"></div></div>
+      <div class="modal-footer"><small class="mr-auto text-muted">Wheel to zoom, drag to move. Green: symbols, orange: OPC, red: equipment, blue: pipes, magenta triangles: flow arrows found.</small>
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const JOB_LIMIT = {{ limit }};
+let lastKey = '';
+const fmtS = s => s >= 60 ? Math.floor(s / 60) + ' min ' + Math.round(s % 60) + ' s' : Math.round(s) + ' s';
+const viewerUrl = p => '/viewer?src=' + encodeURIComponent(p.files['drawing.dxf'].replace(/^\/jobs\//, ''));
+
+function statusChip(j) {
+  if (j.status === 'done') return '<span class="chip ok"><i class="fas fa-check"></i> Processed</span>';
+  if (j.status === 'error') return '<span class="chip bad"><i class="fas fa-exclamation-triangle"></i> Error</span>';
+  if (j.status === 'queued') return '<span class="chip wait"><i class="far fa-clock"></i> Waiting' + (j.queue_pos ? ' · ' + j.queue_pos + ' before it' : '') + '</span>';
+  return '<span class="chip run"><i class="fas fa-cog fa-spin"></i> Processing' + (j.elapsed != null ? ' · ' + fmtS(j.elapsed) : '') + '</span>';
+}
+
+const pill = (n, label, cls) => '<span class="pill ' + (cls || '') + '"><b>' + n + '</b> ' + label + '</span>';
+function counts(p) {
+  let s = pill(p.symbols, 'symbols') + (p.opc ? pill(p.opc, 'OPC') : '') + pill(p.equipment, 'equipment') + pill(p.pipes, 'pipes') + pill(p.dashed, 'signal lines') +
+    (p.line_tags ? pill(p.line_tags, 'line numbers') : '') + (p.flows ? pill(p.flows, 'flows', 'flow') : '') + (p.arrowheads ? pill(p.arrowheads, 'flow arrows') : '');
+  return '<div class="counts">' + s + ' <span class="meta">' + fmtS(p.seconds.total) + '</span></div>' +
+    (p.equipment_list && p.equipment_list.length ? '<div class="eq"><b>Equipment:</b> ' + p.equipment_list.map(esc).join(' · ') + '</div>' : '');
+}
+
+function actions(p, title) {
+  return '<div class="acts"><a href="/compare?job=' + encodeURIComponent(p.files['drawing.dxf'].split('/')[2]) + '&page=' + (p._k || 0) + '" class="btn btn-brand" title="The original drawing and the result side by side"><i class="fas fa-columns"></i> Side by side</a>' +
+    '<a href="' + viewerUrl(p) + '" class="btn btn-soft" title="Open the DXF in the viewer"><i class="fas fa-eye"></i> View DXF</a>' +
+    '<a href="' + p.files['drawing.dxf'] + '" class="btn btn-soft" title="Download the DXF"><i class="fas fa-download"></i> DXF</a>' +
+    '<a href="/generate_drawing?job=' + encodeURIComponent(p.files['drawing.dxf'].split('/')[2]) + '" class="btn btn-soft" title="Put it on a TCE sheet"><i class="fas fa-border-all"></i> TCE sheet</a>' +
+    '<a href="' + p.files['result.json'] + '" class="btn btn-soft" download title="Download the JSON"><i class="fas fa-file-code"></i> JSON</a>' +
+    '<button type="button" class="btn btn-soft view-btn" data-src="' + p.files['preview.png'] + '" data-title="' + esc(title) + '" title="Picture of what was found"><i class="fas fa-image"></i> Preview</button></div>';
+}
+const compareUrl = (j, k) => '/compare?job=' + encodeURIComponent(j.id) + '&page=' + (k || 0);
+function thumbs(j) {
+  // the original drawing (from the moment it is uploaded) and, once processed, the result next to it
+  const orig = j.status === 'done' && (j.pages || []).length ? '/api/jobs/' + encodeURIComponent(j.id) + '/original?page=0' : '/api/jobs/' + encodeURIComponent(j.id) + '/upload_thumb';
+  const o = '<a href="' + (j.status === 'done' ? compareUrl(j) : orig) + '" title="Original drawing"><img class="thumb" loading="lazy" src="' + orig + '" alt=""><span class="tl">Original</span></a>';
+  const r = j.status === 'done' && (j.pages || []).length
+    ? '<a href="' + compareUrl(j) + '" title="Original and result side by side"><img class="thumb" loading="lazy" src="' + j.pages[0].files['preview.png'] + '" alt=""><span class="tl">Result</span></a>'
+    : '<div class="ph">' + (j.status === 'error' ? 'no result' : 'result appears<br>when processed') + '</div>';
+  return '<div class="thumbs">' + o + r + '</div>';
+}
+
+const selected = new Set();
+const tick = j => j.status === 'running' ? '<span></span>' :
+  '<input type="checkbox" class="sel-box" data-id="' + esc(j.id) + '"' + (selected.has(j.id) ? ' checked' : '') + '>';
+const delBtn = j => j.status === 'running' ? '' :
+  '<button type="button" class="btn btn-sm btn-link text-danger del-btn p-0" data-id="' + esc(j.id) + '" data-file="' + esc(j.file) + '" title="Delete this drawing and its results from the server"><i class="fas fa-trash"></i> Delete</button>';
+
+function render(list) {
+  const q = (document.getElementById('jobSearch') || {}).value;
+  const needle = (q || '').toLowerCase();
+  let html = '';
+  for (const j of list) {
+    const pages = j.pages || [];
+    const hay = (j.file + ' ' + pages.map(p => (p.equipment_list || []).join(' ')).join(' ')).toLowerCase();
+    if (needle && !hay.includes(needle)) continue;
+    const head = '<div class="top"><div><div class="name">' + esc(j.file) + '</div><div class="meta">' + esc(j.submitted) + (j.no_vlm ? ' · without VLM' : '') +
+      (j.finished ? ' · finished ' + esc(j.finished) : '') + '</div></div><div>' + statusChip(j) + ' ' + delBtn(j) + '</div></div>';
+    if (j.status === 'done' && pages.length) {
+          pages.forEach((p, i) => p._k = i);
+      html += '<div class="job">' + tick(j) + thumbs(j) + '<div>' + head +
+        pages.map(p => '<div class="pg">' + (pages.length > 1 ? '<div class="page-name">' + esc(p.name) + '</div>' : '') + counts(p) + actions(p, j.file + (pages.length > 1 ? ' — ' + p.name : '')) + '</div>').join('') + '</div></div>';
+    } else {
+      const extra = j.status === 'error' ? '<div class="text-danger mt-1" style="font-size:.85rem">' + esc((j.error || '').slice(0, 200)) + '</div>'
+        : j.status === 'running' ? '<div class="progress-container"><div class="progress-bar-run"></div></div><div class="small-log" title="' + esc((j.log || []).slice(-1)[0]) + '">' + esc((j.log || []).slice(-1)[0] || '') + '</div>' : '';
+      html += '<div class="job">' + tick(j) + thumbs(j) + '<div>' + head + extra + '</div></div>';
+    }
+  }
+  shown = list.filter(j => j.status !== 'running' && (!needle || (j.file + ' ' + (j.pages || []).map(p => (p.equipment_list || []).join(' ')).join(' ')).toLowerCase().includes(needle))).map(j => j.id);
+  updateSel();
+  document.getElementById('jobBody').innerHTML = html || '<div class="empty">No drawings yet — upload one above.</div>';
+}
+
+let jobsCache = [];
+async function pollJobs() {
+  try {
+    const list = await (await fetch('/api/jobs?limit=' + JOB_LIMIT)).json();
+    const key = JSON.stringify(list.map(j => [j.id, j.status, (j.log || []).length, j.elapsed && Math.floor(j.elapsed / 5)]));
+    if (key === lastKey) return;
+    lastKey = key; jobsCache = list; render(list);
+  } catch (e) { /* server restarting: try again on the next tick */ }
+}
+pollJobs(); setInterval(pollJobs, 3000);
+$(document).on('input', '#jobSearch', () => render(jobsCache));
+let shown = [];
+function updateSel() {
+  for (const id of [...selected]) if (!jobsCache.some(j => j.id === id && j.status !== 'running')) selected.delete(id);
+  document.getElementById('delSel').disabled = !selected.size;
+  document.getElementById('selInfo').textContent = selected.size ? selected.size + ' selected' : '';
+  const all = document.getElementById('selAll');
+  all.checked = shown.length > 0 && shown.every(id => selected.has(id)); all.indeterminate = !all.checked && shown.some(id => selected.has(id));
+}
+$(document).on('change', '.sel-box', function () { this.checked ? selected.add($(this).data('id')) : selected.delete($(this).data('id')); updateSel(); });
+$(document).on('change', '#selAll', function () {
+  shown.forEach(id => this.checked ? selected.add(id) : selected.delete(id));
+  $('.sel-box').prop('checked', this.checked); updateSel();
+});
+$(document).on('click', '#delSel', async function () {
+  const ids = [...selected];
+  if (!ids.length || !confirm('Delete ' + ids.length + ' drawing(s)?\n\nThe uploaded drawings, their DXF, JSON and preview are removed from the server. This cannot be undone.')) return;
+  this.disabled = true; let failed = [];
+  for (const [k, id] of ids.entries()) {
+    document.getElementById('selInfo').textContent = 'Deleting ' + (k + 1) + ' of ' + ids.length + ' …';
+    const r = await fetch('/api/jobs/' + encodeURIComponent(id), { method: 'DELETE' }).catch(() => null);
+    if (r && r.ok) selected.delete(id); else failed.push(id);
+  }
+  if (failed.length) alert(failed.length + ' could not be deleted (being processed, or already gone).');
+  lastKey = ''; await pollJobs(); updateSel();
+});
+$(document).on('click', '.del-btn', async function () {
+  const id = $(this).data('id'), file = $(this).data('file');
+  if (!confirm('Delete "' + file + '" (' + id + ')?\n\nThe uploaded drawing, its DXF, JSON and preview are removed from the server. This cannot be undone.')) return;
+  this.disabled = true;
+  const r = await fetch('/api/jobs/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (!r.ok) { this.disabled = false; alert(((await r.json().catch(() => ({}))).error) || 'Could not delete (' + r.status + ')'); return; }
+  lastKey = ''; pollJobs();
+});
+
+// preview picture: wheel zoom around the mouse, drag to move
+let sc = 1, ox = 0, oy = 0, drag = null;
+const img = document.getElementById('zoomImage'), wrap = document.getElementById('zoomWrap');
+const apply = () => img.style.transform = 'translate(' + ox + 'px,' + oy + 'px) scale(' + sc + ')';
+function fitImg() { const r = wrap.getBoundingClientRect(); sc = Math.min(r.width / img.naturalWidth, r.height / img.naturalHeight) || 1; ox = (r.width - img.naturalWidth * sc) / 2; oy = 0; apply(); }
+img.onload = fitImg;
+$(document).on('click', '.view-btn', function () {
+  $('#outputModalLabel').text($(this).data('title')); img.src = $(this).data('src'); $('#outputModal').modal('show');
+});
+$('#outputModal').on('shown.bs.modal', () => img.complete && fitImg());
+wrap.addEventListener('wheel', e => {
+  e.preventDefault(); const r = wrap.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, z = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+  ox = mx - (mx - ox) * z; oy = my - (my - oy) * z; sc *= z; apply();
+}, { passive: false });
+wrap.addEventListener('mousedown', e => { drag = [e.clientX - ox, e.clientY - oy]; wrap.style.cursor = 'grabbing'; });
+document.addEventListener('mousemove', e => { if (drag) { ox = e.clientX - drag[0]; oy = e.clientY - drag[1]; apply(); } });
+document.addEventListener('mouseup', () => { drag = null; wrap.style.cursor = 'grab'; });
+</script>

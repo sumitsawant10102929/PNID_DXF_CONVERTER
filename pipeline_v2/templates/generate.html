@@ -1,0 +1,193 @@
+{% extends "_base.html" %}
+{% block title %}ReDraft{% endblock %}
+{% block head %}
+<style>
+  .pick-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .pick-row select { flex: 1; min-width: 260px; max-width: 700px; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+  #pic { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: white; cursor: zoom-in; }
+  .tpl label { font-size: .78rem; font-weight: 600; margin-bottom: 1px; color: var(--brand-dark); }
+  .tpl .form-control { font-size: .85rem; padding: 3px 8px; height: auto; border-radius: 6px; }
+  .tpl table input { width: 100%; border: 1px solid var(--line); border-radius: 4px; font-size: .8rem; padding: 2px 5px; }
+  .tpl table th { font-size: .72rem; padding: 2px 4px; color: var(--brand-dark); font-weight: 600; }
+  .tpl table td { padding: 2px 3px; }
+  #tplMsg { font-size: .9rem; margin-top: 10px; }
+  .layers { font-size: .83rem; color: var(--mute); line-height: 1.9; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+{% block body %}
+<div class="page">
+  <div class="page-head">
+    <h2>Generate</h2>
+    <span class="sub">Open or download the DXF of a processed drawing, or put it on a TCE sheet. AutoCAD opens the DXF directly, in millimetres at the sheet's real size.</span>
+  </div>
+
+  <div class="card-box">
+    <h3><i class="fas fa-file-alt"></i> Drawing</h3>
+    <div class="pick-row">
+      <select id="pick" class="form-control"><option>Loading…</option></select>
+    </div>
+    <div id="facts" class="mt-2"></div>
+    <div class="actions">
+      <a id="bView" class="btn btn-brand btn-big"><i class="fas fa-eye"></i> Open in DXF viewer</a>
+      <a id="bDxf" class="btn btn-soft btn-big"><i class="fas fa-download"></i> Download DXF</a>
+      <a id="bJson" class="btn btn-soft" download><i class="fas fa-file-code"></i> JSON</a>
+      <a class="btn btn-soft" href="/viewer"><i class="fas fa-folder-open"></i> Open another DXF</a>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card-box tpl" id="tpl" style="display:none">
+      <h3><i class="fas fa-border-all"></i> Put the drawing on a TCE sheet</h3>
+      <p class="hint mb-2">The drawing's own border, title block and notes are taken off; the drawing is scaled to fit the template's drawing area
+        (pipes stay on the grid), its notes go into the NOTES box, and the fields below go into the title block. They were read from the
+        drawing's title block (<span id="readBy"></span>): check them and correct anything wrong. In AutoCAD they can still be changed by
+        double-clicking the title block.</p>
+      <div class="form-row">
+        <div class="col-md-3 mb-2"><label for="tSize">Sheet size</label><select id="tSize" class="form-control"></select></div>
+        <div class="col-md-9 mb-2"><label>Drawing title (3 lines; A3 has 2)</label><input class="form-control mb-1" data-f="title" data-i="0"><input class="form-control mb-1" data-f="title" data-i="1"><input class="form-control" data-f="title" data-i="2"></div>
+      </div>
+      <div class="form-row">
+        <div class="col-md-6 mb-2"><label>Client (2 lines)</label><input class="form-control mb-1" data-f="client" data-i="0"><input class="form-control" data-f="client" data-i="1"></div>
+        <div class="col-md-6 mb-2"><label>Project name (2 lines)</label><input class="form-control mb-1" data-f="project" data-i="0"><input class="form-control" data-f="project" data-i="1"></div>
+      </div>
+      <div class="form-row">
+        <div class="col-md-4 mb-1"><label>Drawing number</label><input class="form-control" data-f="drawing_no"></div>
+        <div class="col-md-4 mb-1"><label>Job number</label><input class="form-control" data-f="job_no"></div>
+        <div class="col-md-4 mb-1"><label>File no. / name</label><input class="form-control" data-f="file_no"></div>
+        <div class="col-md-3 mb-1"><label>Revision</label><input class="form-control" data-f="rev"></div>
+        <div class="col-md-3 mb-1"><label>Sheet</label><input class="form-control" data-f="sheet"></div>
+        <div class="col-md-3 mb-1"><label>Scale</label><input class="form-control" data-f="scale"></div>
+        <div class="col-md-3 mb-1"><label>DC &amp; dept</label><input class="form-control" data-f="dc_dept"></div>
+      </div>
+      <label class="mt-2">Revisions (oldest first; the template keeps the latest 4, A3 the latest 8)</label>
+      <table class="w-100"><thead><tr><th style="width:7%">Rev</th><th style="width:13%">Date</th><th>Description</th><th style="width:8%">DRN</th>
+        <th style="width:8%">PRPD</th><th style="width:8%">CHKD</th><th style="width:8%">APPD</th><th style="width:3%"></th></tr></thead><tbody id="revs"></tbody></table>
+      <button class="btn btn-sm btn-soft mt-1" id="addRev" type="button"><i class="fas fa-plus"></i> Revision row</button>
+      <div class="actions">
+        <button class="btn btn-brand btn-big" id="tMake" type="button"><i class="fas fa-file-export"></i> Make sheet DXF</button>
+      </div>
+      <div id="tplMsg"></div>
+    </div>
+
+    <div>
+      <div class="card-box" id="picBox" style="display:none">
+        <h3><i class="fas fa-image"></i> What was found</h3>
+        <a id="picLink"><img id="pic" alt=""></a>
+        <div class="hint mt-1">Green: symbols · orange: OPC · red: equipment · blue: pipes · magenta triangles: flow arrows found. Click to open full size.</div>
+      </div>
+      <div class="card-box">
+        <h3><i class="fas fa-layer-group"></i> Layers in the DXF</h3>
+        <div class="layers">
+          Four groups (a tree in AutoCAD / TrueView's Layer Properties and in the DXF viewer):<br>
+          <b>SYMBOL</b>: every symbol on one layer (each class in its own colour) · <b>EQUIPMENT</b> ·
+          <b>PIPES</b>: <code>PIPES-Process lines</code>, <code>PIPES-Signal lines</code> ·
+          <b>FLOW ARROWS</b>: the drawing's flow arrows as found ·
+          <b>OTHERS</b>: <code>OTHERS-Text</code>, <code>-Line numbers</code>, <code>-Details</code>, <code>-Sheet template</code> (border, title block, revision table, logo and their text),
+          <code>-Revision clouds</code>, <code>-Filled marks</code>, <code>-Notes</code>, and on a TCE sheet the template's own layers.
+          Only layers that have something on them are written.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let items = [];
+const viewerUrl = p => '/viewer?src=' + encodeURIComponent(p.files['drawing.dxf'].replace(/^\/jobs\//, ''));
+const pill = (n, label, cls) => '<span class="pill ' + (cls || '') + '"><b>' + n + '</b> ' + label + '</span>';
+function show() {
+  const it = items[document.getElementById('pick').value];
+  const on = !!it;
+  for (const id of ['bView', 'bDxf', 'bJson']) document.getElementById(id).style.visibility = on ? 'visible' : 'hidden';
+  document.getElementById('tpl').style.display = on ? '' : 'none';
+  document.getElementById('picBox').style.display = on ? '' : 'none';
+  if (!on) { document.getElementById('facts').innerHTML = ''; document.getElementById('pic').src = ''; return; }
+  loadSheet(it);
+  const p = it.p;
+  document.getElementById('bView').href = viewerUrl(p);
+  document.getElementById('bDxf').href = p.files['drawing.dxf'];
+  document.getElementById('bJson').href = p.files['result.json'];
+  document.getElementById('pic').src = p.files['preview.png']; document.getElementById('picLink').href = p.files['preview.png'];
+  document.getElementById('facts').innerHTML = pill(p.symbols, 'symbols') + (p.opc ? pill(p.opc, 'OPC') : '') + pill(p.equipment, 'equipment') + pill(p.pipes, 'pipes') +
+    pill(p.dashed, 'signal lines') + (p.line_tags ? pill(p.line_tags, 'line numbers') : '') + (p.flows ? pill(p.flows, 'flows', 'flow') : '') + (p.arrowheads ? pill(p.arrowheads, 'flow arrows') : '') +
+    '<div class="hint mt-1"><b>Equipment:</b> ' + ((p.equipment_list || []).map(esc).join(' · ') || 'none') + '</div>';
+}
+// ---- TCE sheet template
+const REV = ['rev', 'date', 'description', 'drn', 'prpd', 'chkd', 'appd'];
+let cur = null, sizes = {};
+function revRow(r) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = REV.map(k => '<td><input data-r="' + k + '" value="' + esc((r || {})[k] || '') + '"></td>').join('') +
+    '<td><button type="button" class="btn btn-sm btn-link text-danger p-0" title="Remove"><i class="fas fa-times"></i></button></td>';
+  tr.querySelector('button').onclick = () => tr.remove();
+  document.getElementById('revs').appendChild(tr);
+}
+function made(m) {
+  const sz = document.getElementById('tSize').value, u = (m || {})[sz];
+  document.getElementById('tplMsg').innerHTML = u ? '<span class="chip ok"><i class="fas fa-check"></i> Made earlier on ' + sz + '</span> <a href="/viewer?src=' + encodeURIComponent(u.replace(/^\/jobs\//, '')) +
+    '"><i class="fas fa-eye"></i> view</a> · <a href="' + u + '"><i class="fas fa-download"></i> download</a> <span class="hint">(make it again after changing the fields)</span>' : '';
+}
+async function loadSheet(it) {
+  cur = it; const msg = document.getElementById('tplMsg'); msg.innerHTML = '<span class="hint"><i class="fas fa-spinner fa-spin"></i> Reading the title block…</span>';
+  const r = await (await fetch('/api/jobs/' + it.jid + '/sheet?page=' + it.k)).json();
+  if (cur !== it) return;
+  sizes = r.sizes;
+  const sel = document.getElementById('tSize');
+  sel.innerHTML = Object.entries(r.sizes).map(([k, f]) => '<option value="' + k + '">' + k + ' (' + f + ')</option>').join('');
+  sel.value = r.fields.size || r.size || 'A1';
+  sel.onchange = () => made(cur.made);
+  document.getElementById('readBy').textContent = {vlm: 'read by the VLM', ocr: 'read from the OCR text', saved: 'as you last saved them', none: 'no title block found'}[r.read_by] || r.read_by;
+  for (const el of document.querySelectorAll('.tpl [data-f]')) {
+    const v = r.fields[el.dataset.f];
+    el.value = el.dataset.i !== undefined ? ((v || [])[+el.dataset.i] || '') : (v || '');
+  }
+  document.getElementById('revs').innerHTML = '';
+  (r.fields.revisions || []).forEach(revRow);
+  it.made = r.made; made(r.made);
+}
+function fields() {
+  const f = {revisions: []};
+  for (const el of document.querySelectorAll('.tpl [data-f]')) {
+    if (el.dataset.i !== undefined) { (f[el.dataset.f] = f[el.dataset.f] || [])[+el.dataset.i] = el.value; }
+    else f[el.dataset.f] = el.value;
+  }
+  for (const tr of document.querySelectorAll('#revs tr')) {
+    const r = {}; for (const el of tr.querySelectorAll('[data-r]')) r[el.dataset.r] = el.value; f.revisions.push(r);
+  }
+  return f;
+}
+document.getElementById('addRev').onclick = () => revRow({});
+document.getElementById('tMake').onclick = async () => {
+  if (!cur) return;
+  const btn = document.getElementById('tMake'), msg = document.getElementById('tplMsg'), size = document.getElementById('tSize').value;
+  btn.disabled = true; msg.innerHTML = '<span class="hint"><i class="fas fa-spinner fa-spin"></i> Making the ' + size + ' sheet…</span>';
+  try {
+    const r = await (await fetch('/api/jobs/' + cur.jid + '/sheet', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({page: cur.k, size, fields: fields()})})).json();
+    if (r.error) { msg.innerHTML = '<span class="text-danger">' + esc(r.error) + '</span>'; return; }
+    cur.made = Object.assign(cur.made || {}, {[size]: r.dxf});
+    msg.innerHTML = '<span class="chip ok"><i class="fas fa-check"></i> ' + size + ' sheet ready</span> <span class="hint">(TCE form ' + r.form + ', drawing scaled ×' + r.scale + ')</span><br>' +
+      '<a class="btn btn-brand btn-sm mt-2" href="/viewer?src=' + encodeURIComponent(r.view) + '"><i class="fas fa-eye"></i> View</a> ' +
+      '<a class="btn btn-soft btn-sm mt-2" href="' + r.dxf + '"><i class="fas fa-download"></i> Download DXF</a>';
+  } catch (e) { msg.innerHTML = '<span class="text-danger">Could not make the sheet.</span>'; }
+  finally { btn.disabled = false; }
+};
+
+(async () => {
+  const list = await (await fetch('/api/jobs?limit=0')).json();
+  for (const j of list) if (j.status === 'done') (j.pages || []).forEach((p, k) =>
+    items.push({ p, jid: j.id, k, label: j.file + ((j.pages.length > 1) ? ' — ' + p.name : '') + '  (' + j.finished + ')' }));
+  const want = new URLSearchParams(location.search).get('job');
+  const sel = document.getElementById('pick');
+  sel.innerHTML = items.length ? items.map((it, k) => '<option value="' + k + '">' + esc(it.label) + '</option>').join('')
+                               : '<option value="">No processed drawing yet — upload one on the Detect page</option>';
+  if (want) { const k = items.findIndex(it => it.p.files['drawing.dxf'].includes('/' + want + '/')); if (k >= 0) sel.value = k; }
+  sel.onchange = show; show();
+})();
+</script>
+{% endblock %}

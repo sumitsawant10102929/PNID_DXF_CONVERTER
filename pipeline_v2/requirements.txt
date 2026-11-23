@@ -1,0 +1,9 @@
+# pipeline_v2/.venv extras (torch, ultralytics, opencv, pymupdf come from ~/.local). Install rapidocr-onnxruntime with --no-deps.
+ezdxf==1.4.5
+Flask==3.1.3
+onnxruntime-gpu==1.31.1
+pyclipper==1.4.0
+PyYAML==6.0.1
+rapidocr-onnxruntime==1.4.4
+shapely==2.2.0
+six==1.16.0

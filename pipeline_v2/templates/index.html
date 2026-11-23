@@ -1,0 +1,470 @@
+{% extends "_base.html" %}
+{# Home (user, 2026-11-23): on opening, a still picture of a small P&ID next to the headline - nothing plays by itself. Scrolling
+   drives everything: the drawing travels across the whole screen (right -> left -> zoomed into the vessel -> centre) while it is
+   read, its symbols and equipment found and its pipes traced, the captions come in from alternating sides, and at the end the
+   sheet splits into its DXF layers fanned out over the full width (stacked upwards on a phone). Scrolling back plays it back.
+   Then what this server has done so far (live from /api/jobs). Overrides the project's templates/index.html. #}
+{% block title %}ReDraft{% endblock %}
+{% block head %}
+<style>
+  :root { --navy: #121c33; --navy2: #1c2c4f; --sym: #22b35e; --opc: #f08a24; --eq: #e5484d; --pipe: #3b82f6; --flow: #d946ef; --tpl: #94a3b8; }
+  body { background: #eef2f7; }
+
+  /* the scene: a tall section; its first screen is the hero, the rest is scroll room for the animation */
+  .scene { position: relative; height: 1500vh; color: #e8eefb;   /* scroll room: ~2.5 screens of scrolling per step */
+    background: radial-gradient(1200px 600px at 85% 10%, rgba(59,130,246,.28), transparent 60%),
+                radial-gradient(900px 500px at 0% 100%, rgba(217,70,239,.14), transparent 60%),
+                linear-gradient(160deg, var(--navy) 0%, var(--navy2) 100%); }
+  .pin { position: sticky; top: 60px; height: calc(100vh - 60px); height: calc(100svh - 60px); overflow: hidden; }   /* under the top bar */
+  .grid { position: absolute; inset: -240px 0 0 0; pointer-events: none; opacity: .5; will-change: transform;
+    background-image: linear-gradient(rgba(148,163,184,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.08) 1px, transparent 1px),
+                      linear-gradient(rgba(148,163,184,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.05) 1px, transparent 1px);
+    background-size: 120px 120px, 120px 120px, 24px 24px, 24px 24px; }
+  .bignum { position: absolute; right: 3vw; bottom: -4vh; font-size: min(38vw, 46vh); font-weight: 800; line-height: 1; letter-spacing: -.04em;
+            color: transparent; -webkit-text-stroke: 1.5px rgba(148,163,184,.12); pointer-events: none; user-select: none; will-change: transform, opacity; }
+
+  /* the intro (hero text) */
+  .intro { position: absolute; left: max(32px, calc(50vw - 640px)); top: 50%; transform: translateY(-50%); width: min(40vw, 540px); z-index: 4; will-change: transform, opacity; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: .78rem; letter-spacing: .14em; font-weight: 700; color: #9cc3f5; text-transform: uppercase; }
+  .eyebrow img { width: 22px; height: 22px; }
+  .intro h1 { font-size: clamp(2rem, 3.4vw, 3.15rem); line-height: 1.08; font-weight: 750; margin: 14px 0 16px; color: #fff; letter-spacing: -.01em; }
+  .intro h1 span { background: linear-gradient(90deg, #60a5fa, #a78bfa 55%, #f0abfc); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { font-size: 1.06rem; color: #b9c6de; line-height: 1.6; margin: 0; }
+  .cta { display: flex; gap: 12px; flex-wrap: wrap; margin: 26px 0 28px; }
+  .cta a { display: inline-flex; align-items: center; gap: 10px; padding: 13px 22px; border-radius: 10px; font-weight: 650; font-size: 1.02rem; text-decoration: none; transition: transform .15s, box-shadow .15s, background .15s; }
+  .cta .go { background: linear-gradient(135deg, #3b82f6, #2d6cb5); color: #fff; box-shadow: 0 8px 24px rgba(59,130,246,.35); }
+  .cta .go:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(59,130,246,.45); color: #fff; }
+  .cta .ghost { color: #dbe6f7; border: 1px solid rgba(219,230,247,.28); background: rgba(255,255,255,.04); }
+  .cta .ghost:hover { background: rgba(255,255,255,.1); color: #fff; }
+  .scrollhint { display: inline-flex; align-items: center; gap: 10px; color: #9fb0cc; font-size: .8rem; letter-spacing: .12em; font-weight: 600; text-decoration: none; text-transform: uppercase; }
+  .scrollhint:hover { color: #fff; text-decoration: none; }
+
+  /* the drawing: placed by the script (left/top = the middle of the screen, then moved, scaled and turned) */
+  .stage { position: absolute; left: 50%; top: 50%; width: var(--w); aspect-ratio: 16 / 10; margin-left: calc(var(--w) / -2); margin-top: calc(var(--w) * -.3125);
+           perspective: 1700px; z-index: 2; will-change: transform; --w: min(54vw, 128vh); }
+  .stack { position: absolute; inset: 0; transform-style: preserve-3d; }
+  .layer { position: absolute; inset: 0; border-radius: 10px; outline: 1.5px solid transparent; transition: background .6s, box-shadow .6s, outline-color .6s; }
+  .layer svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  .layer.l0 { background: #fbfaf6; box-shadow: 0 30px 60px rgba(0,0,0,.45); }
+  .layer .tag { position: absolute; left: 14px; top: -30px; font-weight: 700; font-size: .82rem; letter-spacing: .08em; color: #fff; opacity: 0; transition: opacity .4s;
+                padding: 3px 10px; border-radius: 6px; background: var(--c); white-space: nowrap; }
+  .stage.dxf .layer:not(.l0) { background: rgba(148,163,184,.07); outline-color: color-mix(in srgb, var(--c) 70%, transparent); }
+  .stage.dxf .layer .tag { opacity: 1; }
+  .stage.dxf .layer.l0 { box-shadow: 0 60px 90px rgba(0,0,0,.55); }
+
+  .ink { fill: none; stroke: #5b6472; stroke-width: 2; stroke-linejoin: round; transition: stroke .5s, fill .5s, stroke-width .5s; }
+  .fillink { fill: #5b6472; stroke: none; }
+  .txt { fill: #4b5563; font: 600 10px "Segoe UI", Arial, sans-serif; transition: fill .5s; }
+  .thin { stroke-width: 1.2; }
+  .stage.ocr .txt { fill: #1f2937; }
+  .ocrbox { fill: rgba(250,204,21,.18); stroke: #eab308; stroke-width: 1; stroke-dasharray: 3 2; opacity: 0; transition: opacity .25s; }
+  .stage.ocr .ocrbox.hit { opacity: 1; }
+  .det { opacity: 0; transform-box: fill-box; transform-origin: center; transform: scale(1.35); transition: opacity .3s, transform .4s cubic-bezier(.3,1.6,.5,1); }
+  .det.hit { opacity: 1; transform: none; }
+  .det rect { fill: none; stroke-width: 2; }
+  .det text { font: 700 9px "Segoe UI", Arial, sans-serif; }
+  .det .lab { stroke: none; }
+  .det.s rect { stroke: var(--sym); } .det.s .lab { fill: var(--sym); } .det.s text { fill: #fff; }
+  .det.o rect { stroke: var(--opc); } .det.o .lab { fill: var(--opc); } .det.o text { fill: #fff; }
+  .det.e rect { stroke: var(--eq); stroke-width: 2.5; } .det.e .lab { fill: var(--eq); } .det.e text { fill: #fff; }
+  .stage.sym .sym-ink { stroke: var(--sym); } .stage.sym .opc-ink { stroke: var(--opc); }
+  .stage.eq .eq-ink { stroke: var(--eq); }
+  .stage.dxf .det { opacity: 0; }
+  .pipe-ink { stroke-dasharray: 1; }
+  .pipe-over { stroke: var(--pipe); stroke-width: 3; stroke-dashoffset: 1; }
+  .stage.pipe .tpl-ink { stroke: var(--tpl); } .stage.pipe .tpl-txt { fill: #64748b; }
+  .flow-ink { transition: fill .3s; } .flow-ink.hit { fill: var(--flow); }
+  .scanwrap { position: absolute; inset: 0; overflow: hidden; border-radius: 10px; pointer-events: none; }
+  .scan { position: absolute; top: 0; bottom: 0; width: 18%; left: var(--sx, -18%); opacity: var(--so, 0); pointer-events: none;
+          background: linear-gradient(90deg, transparent, rgba(96,165,250,.0) 30%, rgba(96,165,250,.35) 92%, rgba(191,219,254,.95) 100%); mix-blend-mode: multiply; }
+  .scan::after { content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 2px; background: #60a5fa; box-shadow: 0 0 18px 4px rgba(96,165,250,.8); }
+  .file { position: absolute; right: 2%; bottom: -16%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px;
+          background: rgba(15,23,42,.88); border: 1px solid rgba(148,163,184,.35); color: #e2e8f0;
+          opacity: 0; transform: translateY(14px); transition: opacity .4s, transform .4s; z-index: 5; }
+  .file i { font-size: 1.7rem; color: #60a5fa; } .file b { display: block; font-size: .95rem; } .file small { color: #94a3b8; font-size: .78rem; }
+  .stage.done .file { opacity: 1; transform: none; }
+
+  /* the step captions: each comes in from its own side of the screen */
+  .cap { position: absolute; z-index: 4; width: min(30vw, 420px); top: 50%; padding: 22px 24px; border-radius: 14px; opacity: 0; pointer-events: none;
+         background: rgba(13,22,40,.9); border: 1px solid rgba(148,163,184,.2); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+         box-shadow: 0 20px 50px rgba(0,0,0,.35); border-left: 3px solid var(--c); will-change: transform, opacity; }
+  .cap.on { pointer-events: auto; }
+  .cap.left { left: max(32px, calc(50vw - 640px)); } .cap.right { right: max(32px, calc(50vw - 640px)); }
+  .cap.top { left: max(32px, calc(50vw - 640px)); top: 9vh; width: min(32vw, 440px); }
+  .cap .k { font-size: .78rem; letter-spacing: .14em; font-weight: 700; color: var(--c); text-transform: uppercase; }
+  .cap h3 { font-size: clamp(1.25rem, 1.9vw, 1.75rem); font-weight: 720; color: #fff; margin: 8px 0 10px; line-height: 1.2; }
+  .cap p { color: #b9c6de; line-height: 1.6; font-size: 1rem; margin: 0 0 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips span { font-size: .8rem; padding: 4px 11px; border-radius: 99px; color: #dbe6f7; opacity: 0; transform: translateY(8px); transition: opacity .3s, transform .3s;
+                background: color-mix(in srgb, var(--c) 16%, transparent); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); }
+  .cap.on .chips span { opacity: 1; transform: none; }
+  .cap.on .chips span:nth-child(2) { transition-delay: .08s; } .cap.on .chips span:nth-child(3) { transition-delay: .16s; } .cap.on .chips span:nth-child(4) { transition-delay: .24s; }
+  .cap .cta { margin: 18px 0 0; }
+
+  /* the progress rail: bottom middle */
+  .rail { position: absolute; left: 50%; bottom: 2.6vh; transform: translateX(-50%); z-index: 5; width: min(560px, 62vw); opacity: 0; transition: opacity .3s;
+          padding: 10px 18px 8px; border-radius: 12px; background: rgba(13,22,40,.78); }
+  .rail.show { opacity: 1; }
+  .rail .bars { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .rail .bars i { height: 4px; border-radius: 4px; background: rgba(148,163,184,.22); overflow: hidden; position: relative; cursor: pointer; }
+  .rail .bars i::after { content: ""; position: absolute; inset: 0; background: var(--c); transform: scaleX(var(--f, 0)); transform-origin: left; }
+  .rail .lbl { text-align: center; font-size: .8rem; color: #cbd5e1; font-weight: 600; margin-top: 8px; }
+  .rail .lbl span { color: #8ea0bf; font-weight: 500; margin-right: 8px; }
+
+  /* below the scene */
+  .strip { max-width: 1320px; margin: -34px auto 0; position: relative; z-index: 6; padding: 0 32px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border-radius: 14px; box-shadow: 0 10px 34px rgba(16,24,40,.12); overflow: hidden; }
+  .stats div { padding: 20px 24px; border-right: 1px solid #edf1f7; }
+  .stats div:last-child { border-right: none; }
+  .stats b { display: block; font-size: 1.9rem; font-weight: 750; color: #12203d; font-variant-numeric: tabular-nums; }
+  .stats span { color: #6b7280; font-size: .88rem; } .stats i { color: var(--c); margin-right: 6px; }
+  .recent { max-width: 1320px; margin: 30px auto 50px; padding: 0 32px; }
+  .recent h3 { font-size: 1.1rem; font-weight: 650; margin: 0 0 14px; color: #1f2937; display: flex; justify-content: space-between; align-items: baseline; }
+  .recent h3 a { font-size: .9rem; font-weight: 600; }
+  .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .cards a { display: block; background: #fff; border-radius: 12px; overflow: hidden; border: 1px solid #e5e9f0; text-decoration: none; color: #1f2937; transition: transform .15s, box-shadow .15s; }
+  .cards a:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(16,24,40,.12); }
+  .cards .th { height: 140px; background: #f4f6fa center / cover no-repeat; border-bottom: 1px solid #eef1f6; }
+  .cards .meta { padding: 10px 12px; } .cards .meta b { display: block; font-size: .86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cards .meta small { color: #6b7280; font-size: .78rem; }
+  .empty { color: #6b7280; }
+
+  /* phones and narrow / tall windows: text above, the drawing below it, captions as a card at the bottom */
+  @media (max-width: 860px), (max-aspect-ratio: 1/1) {
+    .scene { height: 1300vh; }
+    .stage { --w: min(92vw, 70vh); }
+    .intro { left: 16px; right: 16px; width: auto; top: 22px; transform: none; }
+    .intro h1 { font-size: clamp(1.7rem, 7.4vw, 2.4rem); margin: 10px 0 10px; }
+    .lead { font-size: .95rem; line-height: 1.5; }
+    .cta { margin: 16px 0 14px; } .cta a { padding: 11px 16px; font-size: .95rem; }
+    .cap, .cap.left, .cap.right, .cap.top { left: 16px; right: 16px; width: auto; top: auto; bottom: calc(5vh + 34px); padding: 16px 18px; }
+    .cap h3 { font-size: 1.2rem; margin: 6px 0 6px; } .cap p { font-size: .9rem; line-height: 1.5; margin-bottom: 10px; }
+    .rail { width: auto; left: 16px; right: 16px; transform: none; bottom: 2.2vh; }
+    .layer .tag { font-size: .66rem; top: -22px; padding: 2px 7px; left: 8px; }
+    .file { padding: 7px 10px; gap: 8px; bottom: -30%; right: 0; } .file i { font-size: 1.2rem; } .file b { font-size: .82rem; } .file small { font-size: .7rem; }
+    .stats { grid-template-columns: repeat(2, 1fr); } .cards { grid-template-columns: repeat(2, 1fr); } .strip, .recent { padding: 0 16px; }
+    .stats div { padding: 14px 16px; } .stats b { font-size: 1.5rem; }
+  }
+  @media (max-width: 860px) and (max-height: 700px), (max-width: 380px) { .lead { display: none; } }
+  @media (max-width: 860px) and (max-height: 700px) { .file { display: none; } }
+  @media (max-width: 520px) { .cap p { display: none; } }
+</style>
+{% endblock %}
+
+{% block body %}
+<section class="scene" id="scene">
+  <div class="pin" id="pin">
+    <div class="grid" id="grid"></div>
+    <div class="bignum" id="bignum">01</div>
+
+    <div class="intro" id="intro">
+      <div class="eyebrow"><img src="/favicon.svg?v=2" alt=""> ReDraft · P&amp;ID digitisation by TCE</div>
+      <h1>Turn any P&amp;ID into a <span>layered CAD drawing</span></h1>
+      <p class="lead">Upload a PDF or a scan. Every tag is read; valves, instruments, off-page connectors and equipment are
+        found; pipes and flow are traced. You get a DXF with clean layers, ready to open in AutoCAD.</p>
+      <div class="cta">
+        <a class="go" href="/upload"><i class="fa-solid fa-upload"></i> Convert a drawing <i class="fa-solid fa-arrow-right"></i></a>
+        <a class="ghost" href="/logs"><i class="fas fa-history"></i> History</a>
+      </div>
+      <a class="scrollhint" href="#" id="hint"><i class="fa-solid fa-chevron-down"></i> Scroll to see how it works</a>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="stack">
+        <!-- OTHERS: sheet template and texts (the paper) -->
+        <div class="layer l0" style="--c:#64748b"><span class="tag">OTHERS · TEXT · SHEET</span>
+          <svg viewBox="0 0 640 400">
+            <rect x="10" y="10" width="620" height="380" class="ink tpl-ink thin"/>
+            <path d="M470 330H630M470 350H630M470 370H630M540 350V390M470 330V390" class="ink tpl-ink thin"/>
+            <text x="478" y="344" class="txt tpl-txt">P&amp;ID · CRUDE FEED SYSTEM</text>
+            <text x="478" y="364" class="txt tpl-txt" style="font-size:9px">DWG 120-A-0007</text>
+            <text x="478" y="384" class="txt tpl-txt" style="font-size:9px">TCE</text>
+            <text x="548" y="384" class="txt tpl-txt" style="font-size:9px">REV 2</text>
+            <rect class="ocrbox" x="73" y="48" width="38" height="14" rx="2"/><text x="76" y="59" class="txt">V-101</text>
+            <rect class="ocrbox" x="140" y="128" width="62" height="14" rx="2"/><text x="143" y="139" class="txt">6"-P-1012</text>
+            <rect class="ocrbox" x="290" y="280" width="62" height="14" rx="2"/><text x="293" y="291" class="txt">2"-D-1013</text>
+            <rect class="ocrbox" x="476" y="333" width="148" height="14" rx="2"/>
+            <rect class="ocrbox" x="476" y="353" width="62" height="14" rx="2"/>
+          </svg>
+        </div>
+        <!-- PIPES -->
+        <div class="layer l1" style="--c:var(--pipe)"><span class="tag">PIPES</span>
+          <svg viewBox="0 0 640 400">
+            <path pathLength="1" d="M120 150H200" class="ink pipe-ink"/>
+            <path pathLength="1" d="M230 150H330" class="ink pipe-ink"/>
+            <path pathLength="1" d="M360 150H556" class="ink pipe-ink"/>
+            <path pathLength="1" d="M90 250V300H250" class="ink pipe-ink"/>
+            <path pathLength="1" d="M280 300H556" class="ink pipe-ink"/>
+            <path pathLength="1" d="M440 300V150" class="ink pipe-ink"/>
+          </svg>
+        </div>
+        <!-- SYMBOL + EQUIPMENT -->
+        <div class="layer l2" style="--c:var(--sym)"><span class="tag">SYMBOL · EQUIPMENT</span>
+          <svg viewBox="0 0 640 400">
+            <rect x="60" y="70" width="60" height="180" rx="28" class="ink eq-ink"/>
+            <path d="M60 110H120M60 210H120" class="ink eq-ink thin" stroke-dasharray="4 3"/>
+            <path d="M200 140L230 160V140L200 160Z" class="ink sym-ink"/>
+            <path d="M330 140L360 160V140L330 160Z M345 150V122 M333 122A12 12 0 0 1 357 122Z" class="ink sym-ink"/>
+            <path d="M345 96V108" class="ink sym-ink thin" stroke-dasharray="3 2"/>
+            <circle cx="345" cy="80" r="16" class="ink sym-ink"/>
+            <text x="335" y="78" class="txt" style="font-size:8px">FIC</text><text x="335" y="88" class="txt" style="font-size:8px">101</text>
+            <path d="M250 290L280 310V290L250 310Z" class="ink sym-ink"/>
+            <path d="M556 138H604L616 150L604 162H556Z" class="ink opc-ink"/><text x="561" y="153" class="txt" style="font-size:8px">TO U-200</text>
+            <path d="M556 288H604L616 300L604 312H556Z" class="ink opc-ink"/><text x="561" y="303" class="txt" style="font-size:8px">TO DRAIN</text>
+            <!-- what was found -->
+            <g class="det e"><rect x="52" y="62" width="76" height="196" rx="4"/><rect class="lab" x="52" y="44" width="130" height="16" rx="3"/><text x="57" y="55">V-101 · Vertical vessel</text></g>
+            <g class="det s"><rect x="195" y="134" width="40" height="32" rx="3"/><rect class="lab" x="195" y="166" width="74" height="14" rx="3"/><text x="199" y="176">Gate valve 98%</text></g>
+            <g class="det s"><rect x="323" y="58" width="44" height="108" rx="3"/><rect class="lab" x="370" y="58" width="122" height="14" rx="3"/><text x="374" y="68">Control valve 96% · FIC-101</text></g>
+            <g class="det s"><rect x="245" y="284" width="40" height="32" rx="3"/><rect class="lab" x="245" y="316" width="74" height="14" rx="3"/><text x="249" y="326">Gate valve 97%</text></g>
+            <g class="det o"><rect x="551" y="133" width="70" height="34" rx="3"/><rect class="lab" x="551" y="117" width="28" height="14" rx="3"/><text x="555" y="127">OPC</text></g>
+            <g class="det o"><rect x="551" y="283" width="70" height="34" rx="3"/><rect class="lab" x="551" y="267" width="28" height="14" rx="3"/><text x="555" y="277">OPC</text></g>
+          </svg>
+        </div>
+        <!-- FLOW ARROWS -->
+        <div class="layer l3" style="--c:var(--flow)"><span class="tag">FLOW ARROWS</span>
+          <svg viewBox="0 0 640 400">
+            <path d="M272 143L288 150L272 157Z" class="fillink flow-ink"/>
+            <path d="M492 143L508 150L492 157Z" class="fillink flow-ink"/>
+            <path d="M372 293L388 300L372 307Z" class="fillink flow-ink"/>
+            <path d="M433 234L440 218L447 234Z" class="fillink flow-ink"/>
+            <path d="M83 270L90 286L97 270Z" class="fillink flow-ink"/>
+          </svg>
+        </div>
+      </div>
+      <div class="scanwrap"><div class="scan"></div></div>
+      <div class="file"><i class="fa-solid fa-file-arrow-down"></i><div><b>drawing.dxf</b><small>4 layers · opens in AutoCAD</small></div></div>
+    </div>
+
+    <div class="cap left" style="--c:#eab308">
+      <div class="k">Step 1 · Read</div>
+      <h3>Every word on the sheet is read</h3>
+      <p>OCR goes over the whole drawing and reads the equipment tags, line numbers, instrument tags and notes. The tags later
+        give each valve, instrument and vessel its name.</p>
+      <div class="chips"><span>Equipment tags</span><span>Line numbers</span><span>Instrument tags</span><span>Notes</span></div>
+    </div>
+    <div class="cap right" style="--c:var(--sym)">
+      <div class="k">Step 2 · Detect</div>
+      <h3>Symbols and off-page connectors are found</h3>
+      <p>A detection model trained on the project legend finds the symbols (106 classes: valves, control valves, instruments,
+        reducers and more), each with a confidence, and the off-page connectors.</p>
+      <div class="chips"><span>106 symbol classes</span><span>Confidence per symbol</span><span>OPCs</span></div>
+    </div>
+    <div class="cap right" style="--c:var(--eq)">
+      <div class="k">Step 3 · Equipment</div>
+      <h3>Equipment is outlined and named</h3>
+      <p>Vessels, columns, tanks, pumps and exchangers are boxed and named by a vision-language model that runs on this
+        server, so the drawing never leaves the machine.</p>
+      <div class="chips"><span>Outline</span><span>Tag &amp; type</span><span>Runs on this server</span></div>
+    </div>
+    <div class="cap left" style="--c:var(--pipe)">
+      <div class="k">Step 4 · Pipes &amp; flow</div>
+      <h3>Pipes are traced, flow arrows found</h3>
+      <p>Process and signal lines are traced and joined on a 0.5 mm grid at every corner and branch, each with its own dash
+        pattern and thickness. Flow arrows are found along the pipes.</p>
+      <div class="chips"><span>Process lines</span><span>Signal lines</span><span>Flow arrows</span><span>0.5 mm grid</span></div>
+    </div>
+    <div class="cap top" style="--c:var(--flow)">
+      <div class="k">Step 5 · Export</div>
+      <h3>One DXF, every object on its own layer</h3>
+      <p>Symbols go in as blocks, with pipes, flow arrows, texts and the sheet template each on their own layer. Open it in
+        AutoCAD and switch the layers on and off.</p>
+      <div class="cta"><a class="go" href="/upload"><i class="fa-solid fa-upload"></i> Convert a drawing <i class="fa-solid fa-arrow-right"></i></a></div>
+    </div>
+
+    <div class="rail" id="rail">
+      <div class="bars"><i style="--c:#eab308" title="Read"></i><i style="--c:var(--sym)" title="Detect"></i><i style="--c:var(--eq)" title="Equipment"></i><i style="--c:var(--pipe)" title="Pipes &amp; flow"></i><i style="--c:var(--flow)" title="Export DXF"></i></div>
+      <div class="lbl" id="lbl"><span>Step 1 of 5</span>Read</div>
+    </div>
+  </div>
+</section>
+
+<div class="strip">
+  <div class="stats">
+    <div style="--c:#2d6cb5"><b data-n="drawings">–</b><span><i class="fa-solid fa-file-lines"></i>Drawings converted</span></div>
+    <div style="--c:var(--sym)"><b data-n="symbols">–</b><span><i class="fa-solid fa-shapes"></i>Symbols &amp; OPCs found</span></div>
+    <div style="--c:var(--pipe)"><b data-n="pipes">–</b><span><i class="fa-solid fa-grip-lines"></i>Pipe lines traced</span></div>
+    <div style="--c:var(--opc)"><b data-n="secs">–</b><span><i class="fa-solid fa-stopwatch"></i>Seconds per drawing (median)</span></div>
+  </div>
+</div>
+
+<section class="recent">
+  <h3>Recent drawings <a href="/logs">All in History <i class="fa-solid fa-arrow-right"></i></a></h3>
+  <div class="cards" id="cards"><div class="empty">Loading…</div></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const scene = $('scene'), stage = $('stage'), intro = $('intro'), rail = $('rail'), lbl = $('lbl'), bignum = $('bignum'), grid = $('grid');
+  const caps = [...document.querySelectorAll('.cap')], bars = [...rail.querySelectorAll('.bars i')];
+  const stack = stage.querySelector('.stack'), layers = [...stage.querySelectorAll('.layer')];
+  const ocrb = [...stage.querySelectorAll('.ocrbox')], flows = [...stage.querySelectorAll('.flow-ink')];
+  const eqd = stage.querySelector('.det.e'), symd = [...stage.querySelectorAll('.det.s, .det.o')];
+  const over = [...stage.querySelectorAll('.pipe-ink')].map(p => { const o = p.cloneNode(); o.classList.remove('pipe-ink'); o.classList.add('pipe-over'); p.after(o); return o; });
+  const NAMES = ['Read', 'Detect symbols & OPCs', 'Outline equipment', 'Trace pipes & flow', 'Export DXF'];
+  const clamp = v => Math.max(0, Math.min(1, v)), ease = v => v < .5 ? 2 * v * v : 1 - Math.pow(-2 * v + 2, 2) / 2;
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  // the scroll through the scene (0..1) is split into: the hero, then the five steps
+  const STEPS = [[.08, .26], [.26, .44], [.44, .60], [.60, .76], [.76, .93]];
+  // where the drawing is at each point of the scroll: ax / ay = where its focus point (fx, fy of the drawing) sits, in % of the
+  // screen from the middle; s = scale; rx / ry = tilt. Wide screens: it travels right -> left -> into the vessel -> middle.
+  const WIDE = [
+    { P: 0,   ax: 22,  ay: 4,  s: .9,  fx: .5,  fy: .5, rx: 8, ry: -16 },
+    { P: .08, ax: 17,  ay: 1,  s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .22, ax: 17,  ay: 1,  s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .30, ax: -17, ay: 1,  s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .41, ax: -17, ay: 1,  s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .49, ax: -20, ay: 4,  s: 1.9, fx: .14, fy: .4, rx: 0, ry: 0 },
+    { P: .57, ax: -20, ay: 4,  s: 1.9, fx: .14, fy: .4, rx: 0, ry: 0 },
+    { P: .65, ax: 17,  ay: 1,  s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .74, ax: 17,  ay: 1,  s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .82, ax: 13,  ay: 9,  s: .8,  fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: 1,   ax: 13,  ay: 9,  s: .8,  fx: .5,  fy: .5, rx: 0, ry: 0 }];
+  // phones / tall windows: below the text at first, then the upper part of the screen above the caption card
+  const NARROW = [
+    { P: 0,   ax: 0,   ay: 'hero', s: .94, fx: .5, fy: .5, rx: 14, ry: 0 },
+    { P: .08, ax: 0,   ay: -17, s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .22, ax: 0,   ay: -17, s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .30, ax: 0,   ay: -17, s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .41, ax: 0,   ay: -17, s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .49, ax: -18, ay: -17, s: 2.1, fx: .14, fy: .4, rx: 0, ry: 0 },
+    { P: .57, ax: -18, ay: -17, s: 2.1, fx: .14, fy: .4, rx: 0, ry: 0 },
+    { P: .65, ax: 0,   ay: -17, s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .74, ax: 0,   ay: -17, s: 1,   fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: .82, ax: 4,   ay: -2,  s: .72, fx: .5,  fy: .5, rx: 0, ry: 0 },
+    { P: 1,   ax: 4,   ay: -2,  s: .72, fx: .5,  fy: .5, rx: 0, ry: 0 }];
+  // when each caption shows (the step's own range) and where it comes in from
+  const CAPS = [[.09, .25, -1], [.27, .43, 1], [.45, .59, 1], [.61, .75, -1], [.80, 1.01, 0]];
+
+  let narrow = false, W = 0, H = 0, VW = 0, VH = 0, heroY = 0, NAV = 60;
+  function measure() {
+    VW = innerWidth; VH = $('pin').offsetHeight; NAV = document.getElementById('myTopnav').offsetHeight;
+    narrow = matchMedia('(max-width: 860px), (max-aspect-ratio: 1/1)').matches;
+    W = stage.offsetWidth; H = stage.offsetHeight;
+    // on a phone the drawing starts just under the text (the hint)
+    const ib = intro.offsetTop + intro.offsetHeight;
+    heroY = (ib + 22 + H * .94 / 2 - VH / 2) / VH * 100;
+  }
+
+  function pose(P) {
+    const K = narrow ? NARROW : WIDE;
+    let i = 0; while (i < K.length - 2 && P > K[i + 1].P) i++;
+    const a = K[i], b = K[i + 1], t = ease(clamp((P - a.P) / (b.P - a.P)));
+    const o = {};
+    for (const k of ['ax', 'ay', 's', 'fx', 'fy', 'rx', 'ry']) {
+      const va = a[k] === 'hero' ? heroY : a[k], vb = b[k] === 'hero' ? heroY : b[k];
+      o[k] = lerp(va, vb, t);
+    }
+    return o;
+  }
+
+  // the drawing's own state for step k at progress p (what is read / found / traced / split into layers)
+  let lastKey = '';
+  function stageState(k, p) {
+    const key = k + ':' + p.toFixed(3); if (key === lastKey) return; lastKey = key;
+    const e = k === 4 ? ease(clamp((p - .02) / .6)) : 0;
+    const cls = ['', 'ocr', 'ocr sym', 'sym eq', 'sym eq pipe', 'sym eq pipe'][k + (p > 0 || k > 0 ? 1 : 0)];
+    stage.className = 'stage ' + cls + (e > .08 ? ' dxf' : '') + (e > .92 ? ' done' : '');
+    const s = k === 0 ? clamp((p - .05) / .8) : 1;                        // 1 read: the sweep, each text lit when passed
+    stage.style.setProperty('--sx', (-18 + 118 * s) + '%');
+    stage.style.setProperty('--so', k === 0 && s > 0 && s < 1 ? 1 : 0);
+    ocrb.forEach(b => b.classList.toggle('hit', k === 0 && s > 0 && +b.getAttribute('x') / 640 < s * 1.18 - .02));
+    symd.forEach((d, j) => d.classList.toggle('hit', k === 1 && p > .1 + j * .1 || k >= 2));
+    eqd.classList.toggle('hit', k === 2 && p > .15 || k >= 3);
+    over.forEach((o, j) => o.style.strokeDashoffset = 1 - (k > 3 ? 1 : k < 3 ? 0 : clamp((p - .05 - j * .07) / .3)));
+    flows.forEach((f, j) => f.classList.toggle('hit', k > 3 || (k === 3 && p > .55 + j * .06)));
+    // 5 the sheet tilts and its layers fan out: across the whole width (wide), upwards (phone)
+    stack.style.transform = e ? 'rotateX(' + 54 * e + 'deg) rotateZ(' + -32 * e + 'deg)' : '';
+    layers.forEach((l, i) => l.style.transform = !e ? '' : narrow
+      ? 'translate3d(' + ((i - 1.5) * .06 * W * e) + 'px,' + ((1.5 - i) * .1 * W * e) + 'px,' + (i * .25 * W * e) + 'px)'
+      : 'translate3d(' + ((i - 1.5) * .46 * W * e) + 'px,0,' + (i * .07 * W * e) + 'px)');
+  }
+
+  // one frame: everything from the (smoothed) scroll position
+  function draw(P) {
+    const q = pose(P);
+    const tx = q.ax / 100 * VW - (q.fx - .5) * W * q.s, ty = q.ay / 100 * VH - (q.fy - .5) * H * q.s;
+    stage.style.transform = 'translate3d(' + tx.toFixed(1) + 'px,' + ty.toFixed(1) + 'px,0) scale(' + q.s.toFixed(4) + ') perspective(1400px) rotateX(' + q.rx.toFixed(2) + 'deg) rotateY(' + q.ry.toFixed(2) + 'deg)';
+    // the intro slides off to the left (up on a phone)
+    const out = ease(clamp(P / .07));
+    intro.style.opacity = 1 - out;
+    intro.style.transform = narrow ? 'translateY(' + (-40 * out) + 'vh)' : 'translate(' + (-45 * out) + 'vw,-50%)';
+    intro.style.visibility = out > .99 ? 'hidden' : '';
+    // step and captions
+    let k = -1, p = 0;
+    for (let i = 0; i < 5; i++) if (P >= STEPS[i][0]) { k = i; p = clamp((P - STEPS[i][0]) / (STEPS[i][1] - STEPS[i][0])); }
+    stageState(Math.max(0, k), k < 0 ? 0 : p);
+    caps.forEach((c, i) => {
+      const [a, b, side] = CAPS[i], len = b - a;
+      const vin = clamp((P - a) / (len * .22)), vout = i === 4 ? 1 : clamp((b - P) / (len * .18)), v = Math.min(vin, vout);
+      const from = narrow ? 0 : side;                                     // in from its side, out the other way
+      const dx = (P < a + len / 2 ? 1 - ease(vin) : -(1 - ease(vout))) * 14 * from;
+      const dy = narrow || side === 0 ? (1 - ease(v)) * 6 : 0;
+      c.style.opacity = v; c.classList.toggle('on', v > .6);
+      c.style.transform = (side === 0 || narrow ? '' : 'translateY(-50%) ') + 'translate(' + dx + 'vw,' + dy + 'vh)';
+    });
+    // the rail, the big step number, the grid drifting with the scroll
+    rail.classList.toggle('show', k >= 0 && P < .985);
+    bars.forEach((b, i) => b.style.setProperty('--f', i < k ? 1 : i > k ? 0 : clamp(p / .85)));
+    if (k >= 0) lbl.innerHTML = '<span>Step ' + (k + 1) + ' of 5</span>' + NAMES[k].replace('&', '&amp;');
+    bignum.textContent = '0' + (Math.max(0, k) + 1);
+    bignum.style.opacity = k < 0 ? 0 : 1;
+    bignum.style.transform = 'translateY(' + (-(P * 30) % 6) + 'vh)';
+    grid.style.transform = 'translateY(' + (-(P * 2400) % 240) + 'px)';
+  }
+
+  // scroll position -> target; the drawn position eases towards it (only while it is not there yet: nothing runs when still)
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let cur = -1, target = 0, raf = 0;
+  function target_() {
+    const r = scene.getBoundingClientRect(), room = scene.offsetHeight - VH;
+    return clamp((NAV - r.top) / room);                                    // pinned from when the scene reaches the top bar
+  }
+  function tick() {
+    raf = 0;
+    if (cur < 0 || still) cur = target; else cur += (target - cur) * .085;   // glides after the scroll, gently
+    if (Math.abs(target - cur) < .0004) cur = target;
+    draw(cur);
+    if (cur !== target) raf = requestAnimationFrame(tick);
+  }
+  function onScroll() { target = target_(); if (!raf) raf = requestAnimationFrame(tick); }
+  addEventListener('scroll', onScroll, { passive: true });
+  addEventListener('resize', () => { measure(); lastKey = ''; cur = -1; onScroll(); });
+  measure(); onScroll();
+
+  // the hint and the rail jump to a step
+  function goStep(i) {
+    const room = scene.offsetHeight - VH, P = (STEPS[i][0] + STEPS[i][1]) / 2 - (i === 4 ? -.06 : 0);
+    scrollTo({ top: scene.offsetTop - NAV + room * P, behavior: 'smooth' });
+  }
+  $('hint').onclick = ev => { ev.preventDefault(); goStep(0); };
+  bars.forEach((b, i) => b.onclick = () => goStep(i));
+
+  // what this server has done so far
+  function count(el, n) {
+    const t0 = performance.now(), dur = 1100;
+    (function f(t) { const p = Math.min(1, (t - t0) / dur), v = Math.round(n * (1 - Math.pow(1 - p, 3)));
+      el.textContent = v.toLocaleString('en-IN'); if (p < 1) requestAnimationFrame(f); })(t0);
+  }
+  fetch('/api/jobs?limit=0').then(r => r.json()).then(js => {
+    const done = js.filter(j => j.status === 'done'); let d = 0, s = 0, p = 0; const secs = [];
+    done.forEach(j => (j.pages || []).forEach(pg => { d++; s += (pg.symbols || 0) + (pg.opc || 0); p += pg.pipes || 0;
+                                                     if (pg.seconds && pg.seconds.total) secs.push(pg.seconds.total); }));
+    secs.sort((a, b) => a - b);
+    const v = { drawings: d, symbols: s, pipes: p, secs: secs.length ? Math.round(secs[secs.length >> 1]) : 0 };
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { count(e.target, v[e.target.dataset.n]); io.unobserve(e.target); } }));
+    document.querySelectorAll('[data-n]').forEach(el => io.observe(el));    // counted up when they come into view
+    const box = $('cards');
+    const last = done.slice(0, 4);
+    box.innerHTML = last.length ? last.map(j => {
+      const pg = (j.pages || [])[0] || {};
+      return '<a href="/logs"><div class="th" style="background-image:url(\'/api/jobs/' + esc(j.id) + '/upload_thumb\')"></div><div class="meta"><b title="' + esc(j.file) + '">' + esc(j.file) +
+             '</b><small>' + esc((j.finished || j.submitted || '').slice(0, 16)) + ' · ' + ((pg.symbols || 0) + (pg.opc || 0)) + ' symbols · ' + (pg.pipes || 0) + ' pipes</small></div></a>';
+    }).join('') : '<div class="empty">No drawings yet. <a href="/upload">Convert the first one</a>.</div>';
+  }).catch(() => { $('cards').innerHTML = '<div class="empty">The server did not answer.</div>'; });
+})();
+</script>
+{% endblock %}

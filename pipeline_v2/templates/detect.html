@@ -1,0 +1,111 @@
+{% extends "_base.html" %}
+{% block title %}ReDraft{% endblock %}
+{% block head %}
+<style>
+  .drop { display: block; margin: 0; border: 2px dashed #b9c6d8; border-radius: 12px; padding: 26px 18px; text-align: center; background: var(--soft); cursor: pointer; transition: background .15s, border-color .15s; }
+  .drop:hover, .drop.over { background: #e8f0fb; border-color: var(--brand); }
+  .drop i { font-size: 2rem; color: var(--brand); }
+  .drop .big { font-size: 1.05rem; font-weight: 600; margin-top: 6px; }
+  .drop input { display: none; }
+  .files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; min-height: 8px; }
+  .files .pill { display: inline-flex; align-items: center; gap: 6px; }
+  .files .pill button { border: none; background: none; color: var(--mute); padding: 0; line-height: 1; }
+  .opts { display: flex; flex-wrap: wrap; gap: 14px 26px; align-items: center; margin-top: 14px; font-size: .9rem; }
+  .opts label { margin: 0; display: flex; align-items: center; gap: 8px; }
+  .opts input[type=text] { width: 64px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  .status-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+</style>
+{% endblock %}
+{% block body %}
+<div class="page">
+  <div class="page-head">
+    <h2>Detect</h2>
+    <span class="sub">Upload a P&amp;ID; symbols, OPCs, equipment, pipes, text and flow arrows are read and a DXF is made.</span>
+  </div>
+
+  <div class="card-box">
+    <form id="uploadForm">
+      <label class="drop" id="drop" for="fileInput">
+        <i class="fas fa-cloud-upload-alt"></i>
+        <div class="big">Drop drawings here, or click to choose</div>
+        <div class="hint">PDF, PNG, TIF or JPG · one DXF per drawing · a scanned PDF is read from its picture</div>
+        <input type="file" id="fileInput" multiple accept=".pdf,.png,.tif,.tiff,.jpg,.jpeg" />
+      </label>
+      <div class="d-flex align-items-center mt-2" style="gap:10px">
+        <label class="btn btn-soft btn-sm mb-0" for="folderInput"><i class="fas fa-folder-open"></i> Choose a whole folder</label>
+        <input type="file" id="folderInput" webkitdirectory multiple style="display:none" />
+        <span class="hint" id="fileCount"></span>
+      </div>
+      <div class="files" id="fileList"></div>
+      <div class="opts">
+        <label><input type="checkbox" id="noVlm"> Equipment without the VLM <span class="hint">(faster, less exact)</span></label>
+        <label>dpi <input type="text" id="dpi" placeholder="auto"> <span class="hint">(images only)</span></label>
+        <label title="Pipes, symbols and line ends are put on this grid in the DXF (millimetres on the sheet). 0 = keep the drawing's own positions.">Grid (mm) <input type="text" id="grid" value="{{ grid_mm }}"></label>
+      </div>
+      <div class="actions">
+        <button id="uploadButton" class="btn btn-brand btn-big" type="submit"><i class="fas fa-upload"></i> Upload and process</button>
+        <span id="uploadMsg" class="hint"></span>
+      </div>
+      <div class="status-line">
+        <span id="srv" class="srv"></span>
+        <a class="hint" href="/logs"><i class="fas fa-history"></i> All drawings in History</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="page-head"><h2 style="font-size:1.2rem">Recent drawings</h2><span class="sub">The list updates by itself; a drawing takes 1–3 minutes.</span></div>
+  {% with limit=10, search=False %}{% include "_jobs.html" %}{% endwith %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const OK = /\.(pdf|png|tiff?|jpe?g)$/i;
+let chosen = [];
+const drop = document.getElementById('drop'), list = document.getElementById('fileList'), count = document.getElementById('fileCount');
+function showFiles() {
+  list.innerHTML = chosen.map((f, i) => '<span class="pill"><i class="far fa-file"></i> ' + esc(f.name) + ' <button type="button" data-i="' + i + '" title="Remove">&times;</button></span>').join('');
+  count.textContent = chosen.length ? chosen.length + ' file(s) ready' : '';
+}
+function addFiles(fs) { for (const f of fs) if (OK.test(f.name) && !chosen.some(c => c.name === f.name && c.size === f.size)) chosen.push(f); showFiles(); }
+document.getElementById('fileInput').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
+document.getElementById('folderInput').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
+list.onclick = e => { const b = e.target.closest('button'); if (b) { chosen.splice(+b.dataset.i, 1); showFiles(); } };
+for (const ev of ['dragenter', 'dragover']) drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); });
+for (const ev of ['dragleave', 'drop']) drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); });
+drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+
+document.getElementById('uploadForm').onsubmit = async e => {
+  e.preventDefault();
+  const msg = document.getElementById('uploadMsg');
+  if (!chosen.length) { msg.innerHTML = '<span class="text-danger">Choose a PDF, PNG, TIF or JPG first.</span>'; return; }
+  const btn = document.getElementById('uploadButton'); btn.disabled = true;
+  let sent = 0; const files = chosen.slice();
+  for (const f of files) {                     // one job per file; the server works through them one after the other
+    msg.textContent = 'Uploading ' + f.name + ' (' + (sent + 1) + ' of ' + files.length + ')…';
+    const fd = new FormData(); fd.append('file', f, f.name);
+    if (document.getElementById('noVlm').checked) fd.append('no_vlm', '1');
+    const dpi = document.getElementById('dpi').value.trim(); if (dpi) fd.append('dpi', dpi);
+    const grid = document.getElementById('grid').value.trim(); if (grid !== '') fd.append('grid_mm', grid);
+    try {
+      const r = await fetch('/api/jobs', { method: 'POST', body: fd }); const j = await r.json();
+      if (j.id) { sent++; chosen = chosen.filter(c => c !== f); } else msg.innerHTML = '<span class="text-danger">' + esc(f.name) + ': ' + esc(j.error || 'upload failed') + '</span>';
+    } catch (err) { msg.innerHTML = '<span class="text-danger">' + esc(f.name) + ': upload failed</span>'; }
+  }
+  btn.disabled = false; showFiles();
+  if (sent) msg.innerHTML = '<span class="text-success"><i class="fas fa-check"></i> ' + sent + ' file(s) uploaded — see the list below.</span>';
+  pollJobs();
+};
+
+async function pollServer() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    document.getElementById('srv').innerHTML = s.ready
+      ? '<span class="chip on"><i class="fas fa-circle"></i> Models loaded</span>' + (s.running.length ? ' <span class="chip run"><i class="fas fa-cog fa-spin"></i> 1 drawing processing</span>' : '') + (s.queued ? ' <span class="chip wait">' + s.queued + ' waiting</span>' : '')
+      : '<span class="chip wait"><i class="fas fa-spinner fa-spin"></i> Loading models… ' + esc(s.warm_log.slice(-1)[0] || '') + '</span>';
+  } catch (e) { document.getElementById('srv').innerHTML = '<span class="chip off">Server not reachable</span>'; }
+}
+pollServer(); setInterval(pollServer, 3000);
+</script>
+{% endblock %}

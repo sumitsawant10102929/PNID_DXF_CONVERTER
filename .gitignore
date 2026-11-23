@@ -1,0 +1,18 @@
+# environments, caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+# models are not kept in the repository (weights live on the server)
+*.pt
+*.pth
+*.onnx
+*.engine
+*.safetensors
+*.ckpt
+*.gguf
+# job outputs and uploads
+pipeline_v2_jobs/
+# TCE sheet templates (company forms): copied onto the server by hand, see pipeline_v2/sheet_templates/README.md
+pipeline_v2/sheet_templates/*.dwg
+pipeline_v2/sheet_templates/*.dxf

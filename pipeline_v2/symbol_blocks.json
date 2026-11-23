@@ -1,0 +1,141 @@
+{
+  "_about": "Legend class id -> converted symbol block (static/Symbols_dxf, made from static/Symbols_dwg with LibreDWG dwg2dxf). match: 'name' = the block file is named after the class; 'visual' = matched by eye against the legend drawing. keep_text: keep the block's own TEXT / MTEXT (otherwise only the shape is used and the OCR text of the drawing stays). Classes not listed keep their original strokes from the drawing.",
+  "_unmapped_files": {
+    "16_dee.dwg": "square with a triangle - no legend class found",
+    "1_dee.dwg": "three broken lines - no legend class found",
+    "4_dee.dwg": "angle valve with a black ball - no such legend class",
+    "OPC.dwg": "off-page connector - not a class of the new models",
+    "Arrow.dwg / aarow / arr / arrooww / arrow_dee / arroww_dee": "flow arrow - not a class of the new models",
+    "SDTDT, SDTOT, STAR_DELTA_*": "electrical symbols - not P&ID legend classes",
+    "A0_template, A1_*, PID*, PNID*, *_test, 3rd, Drawing*, halfupdated, latest_output_*, new block, non-template, testingg, update, with_template_A1, ag, LINE_ID_1, LINE_TAG": "whole drawings / templates / tag blocks, not symbols",
+    "A1_template.dwg": "not converted: LibreDWG cannot decode it (R2004 section map error)"
+  },
+  "12": {
+    "file": "MAG_FLOW_METER_dee.dxf",
+    "match": "name",
+    "keep_text": true
+  },
+  "18": {
+    "file": "10_dee.dxf",
+    "match": "visual"
+  },
+  "19": {
+    "file": "GLOBE_VALVE_dee.dxf",
+    "match": "name"
+  },
+  "20": {
+    "file": "8_dee.dxf",
+    "match": "visual"
+  },
+  "21": {
+    "file": "PLUG_VALVE_dee.dxf",
+    "match": "name"
+  },
+  "22": {
+    "file": "CHECK_VALVE_dee.dxf",
+    "match": "name"
+  },
+  "23": {
+    "file": "BUTTERFLY_VALVE_dee.dxf",
+    "match": "name"
+  },
+  "25": {
+    "file": "PRESSURE_RELIEF_VALVE_dee.dxf",
+    "match": "name"
+  },
+  "31": {
+    "file": "DIAPHRAGM_VALVE_deee.dxf",
+    "match": "name"
+  },
+  "39": {
+    "file": "12_dee.dxf",
+    "match": "visual"
+  },
+  "44": {
+    "file": "DIAPHRAGM_SEAL_dee.dxf",
+    "match": "name"
+  },
+  "45": {
+    "file": "14_dee.dxf",
+    "match": "visual"
+  },
+  "46": {
+    "file": "PIPE_FLANGE_dee.dxf",
+    "match": "name"
+  },
+  "48": {
+    "file": "BLIND_OPEN_dee.dxf",
+    "match": "name"
+  },
+  "49": {
+    "file": "3_dee.dxf",
+    "match": "visual"
+  },
+  "50": {
+    "file": "19_dee.dxf",
+    "match": "visual"
+  },
+  "51": {
+    "file": "SPECTACLE_BLIND_CLOSED_dee.dxf",
+    "match": "name"
+  },
+  "54": {
+    "file": "Y-TYPE_STRAINER_dee.dxf",
+    "match": "name"
+  },
+  "61": {
+    "file": "13_new.dxf",
+    "match": "visual"
+  },
+  "62": {
+    "file": "6_dee.dxf",
+    "match": "visual"
+  },
+  "67": {
+    "file": "20_dee.dxf",
+    "match": "visual"
+  },
+  "302": {
+    "file": "13_new.dxf",
+    "match": "visual"
+  },
+  "304": {
+    "file": "17_new.dxf",
+    "match": "visual"
+  },
+  "317": {
+    "file": "INTERLOCK_OR_deee.dxf",
+    "match": "name",
+    "keep_text": true
+  },
+  "322": {
+    "file": "DIAPHRAGM_ACTUATOR_dee.dxf",
+    "match": "name"
+  },
+  "328": {
+    "file": "PRESSURE_REDUCING_REGULATOR_dee.dxf",
+    "match": "name"
+  },
+  "132": {
+    "file": "CENTRIFUGAL_PUMP_dee.dxf",
+    "match": "name"
+  },
+  "138": {
+    "file": "SUMP_PUMP_dee.dxf",
+    "match": "name"
+  },
+  "1000": {
+    "file": "OPC.dxf",
+    "match": "name"
+  },
+  "316": {
+    "file": "INTERLOCK_OR_deee.dxf",
+    "match": "visual",
+    "note": "Interlock AND: the interlock diamond without its OR text (the text inside is read from the drawing)"
+  },
+  "603": {
+    "file": "INTERLOCK_OR_deee.dxf",
+    "match": "visual",
+    "note": "Kite: drawn as a diamond like the interlock; the text inside is read from the drawing"
+  }
+}
